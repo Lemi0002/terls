@@ -41,12 +41,34 @@ int main(int argc, char** argv) {
         printf("%lu: index:%lu length:%lu\n", i, atlas.indecies.data[i].index, atlas.indecies.data[i].length);
     }
 
+    printf("Raw:\n");
     for(size_t i = 0; i < atlas.indecies.count; i++) {
-        size_t index = atlas.indecies.data[i].index;
-        printf("%lu: %s\n", i, &atlas.characters.data[index]);
+        printf("%lu: %s\n", i, atlas_get_string_at_index(&atlas, i));
+    }
+
+    size_t *sort = malloc(sizeof(sort) * atlas.indecies.count);
+    for(size_t i = 0; i < atlas.indecies.count; i++) {
+        sort[i] = i;
+    }
+
+    for(size_t i = 0; i < atlas.indecies.count; i++) {
+        for(size_t j = i + 1; j < atlas.indecies.count; j++) {
+            int result = strcmp(atlas_get_string_at_index(&atlas, sort[i]), atlas_get_string_at_index(&atlas, sort[j]));
+            if (result > 0) {
+                size_t tempo = sort[i];
+                sort[i] = sort[j];
+                sort[j] = tempo;
+            }
+        }
+    }
+
+    printf("Sorted:\n");
+    for(size_t i = 0; i < atlas.indecies.count; i++) {
+        printf("%lu: %s\n", i, atlas_get_string_at_index(&atlas, sort[i]));
     }
 
     atlas_free(&atlas);
+    free(sort);
 
     return error_none;
 }

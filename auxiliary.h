@@ -66,12 +66,13 @@ void atlas_append(Atlas* atlas, char* string) {
     atlas->characters.count += length;
 }
 
+char* atlas_get_string_at_index(Atlas* atlas, size_t index) {
+    return &atlas->characters.data[atlas->indecies.data[index].index];
+}
+
 void atlas_free(Atlas* atlas) {
     free(atlas->indecies.data);
     free(atlas->characters.data);
 }
-
-#define atlas_for_each for(size_t i = 0; i < (&atlas)->indecies.count; i++)
-
 
 #endif
