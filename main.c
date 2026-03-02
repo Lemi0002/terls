@@ -13,6 +13,17 @@ enum Error {
     error_readdir
 };
 
+typedef struct Entry {
+    ino_t inode;
+    unsigned char type;
+} Entry;
+
+typedef struct Entries {
+    Entry* data;
+    size_t size;
+    size_t count;
+} Entries;
+
 int main(int argc, char** argv) {
     DIR* directory_stream = opendir("./");
     if (directory_stream == NULL) {
@@ -21,10 +32,12 @@ int main(int argc, char** argv) {
 
     errno = 0;
     Atlas atlas = {0};
+    Entries entries = {0};
     struct dirent* entry = readdir(directory_stream);
 
     while (entry != NULL) {
         atlas_append(&atlas, entry->d_name);
+        dynamic_array_append(&entries, ((Entry){.inode = entry->d_ino, .type = entry->d_type}));
         entry = readdir(directory_stream);
     }
 
@@ -65,6 +78,30 @@ int main(int argc, char** argv) {
     printf("Sorted:\n");
     for(size_t i = 0; i < atlas.indecies.count; i++) {
         printf("%lu: %s\n", i, atlas_get_string_at_index(&atlas, sort[i]));
+    }
+
+    printf("Sorted Types:\n");
+    for(size_t i = 0; i < entries.count; i++) {
+        switch(entries.data[sort[i]].type) {
+            case DT_BLK:
+                printf("%lu: block device\n", i); break;
+            case DT_CHR:
+                printf("%lu: character device\n", i); break;
+            case DT_DIR:
+                printf("%lu: directory\n", i); break;
+            case DT_FIFO:
+                printf("%lu: named pipe\n", i); break;
+            case DT_LNK:
+                printf("%lu: symbolic link\n", i); break;
+            case DT_REG:
+                printf("%lu: regular file\n", i); break;
+            case DT_SOCK:
+                printf("%lu: unix domain socket\n", i); break;
+            case DT_UNKNOWN:
+                printf("%lu: unknown\n", i); break;
+            default:
+                printf("%lu: error\n", i); break;
+        }
     }
 
     atlas_free(&atlas);

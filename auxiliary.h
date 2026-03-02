@@ -37,14 +37,14 @@ do { \
 //
 
 
-typedef struct Data {
+typedef struct Index {
     size_t index;
     size_t length;
-} Data;
+} Index;
 
 typedef struct Atlas {
     struct Indecies {
-        Data* data;
+        Index* data;
         size_t size;
         size_t count;
     } indecies;
@@ -60,7 +60,7 @@ void atlas_append(Atlas* atlas, char* string) {
     dynamic_array_reserve(&atlas->indecies, 1);
     dynamic_array_reserve(&atlas->characters, length);
 
-    atlas->indecies.data[atlas->indecies.count] = (Data){.index = atlas->characters.count, .length = length};
+    atlas->indecies.data[atlas->indecies.count] = (Index){.index = atlas->characters.count, .length = length};
     atlas->indecies.count++;
     memcpy(atlas->characters.data + atlas->characters.count, string, length);
     atlas->characters.count += length;
