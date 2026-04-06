@@ -38,7 +38,7 @@ typedef struct Entries {
     size_t count;
 } Entries;
 
-char entry_map_type_to_character(Entry *entry) {
+char entry_convert_type_to_character(Entry *entry) {
     char value;
     switch(entry->mode & S_IFMT) {
         case S_IFBLK: value = 'b'; break;
@@ -53,7 +53,7 @@ char entry_map_type_to_character(Entry *entry) {
     return value;
 }
 
-const char* entry_map_type_to_string(Entry *entry) {
+const char* entry_convert_type_to_string(Entry *entry) {
     const char* string;
     switch(entry->mode & S_IFMT) {
         case S_IFBLK: string = "block device"; break;
@@ -72,7 +72,7 @@ typedef struct Mode {
     char data[10];
 } Mode;
 
-Mode entry_map_permissions_to_string(Entry *entry) {
+Mode entry_convert_permissions_to_string(Entry *entry) {
     Mode mode;
     for(size_t i = 0; i < sizeof(mode) - 1; ++i) {
         if (entry->mode & (1 << (sizeof(mode) - 2 - i))) {
@@ -102,7 +102,7 @@ size_t convert(char* buffer, int data, int width, size_t start) {
     return start + width;
 }
 
-Time entry_map_time_modified_to_string(Entry *entry) {
+Time entry_convert_time_modified_to_string(Entry *entry) {
     Time time;
     int data;
     size_t index = 0;
@@ -119,6 +119,69 @@ Time entry_map_time_modified_to_string(Entry *entry) {
     index = convert(time.data, time_local->tm_min, 2, index);
     time.data[index++] = 0;
     return time;
+}
+
+typedef enum Sort {
+    SORT_INODE,
+    SORT_TYPE,
+    SORT_PERMISSIONS,
+    SORT_LINK_COUNT,
+    SORT_UID,
+    SORT_GID,
+    SORT_SIZE,
+    SORT_TIME_MODIFIED,
+    SORT_NAME
+} Sort;
+
+void create_sorted_map(Atlas *atlas, Entries *entries, Sort sort, size_t *map) {
+    switch(sort) {
+        case SORT_INODE: break;
+        case SORT_TYPE: break;
+        case SORT_PERMISSIONS: break;
+        case SORT_LINK_COUNT: break;
+        case SORT_UID: break;
+        case SORT_GID: break;
+        case SORT_SIZE:
+            for(size_t i = 0; i < atlas->indecies.count; i++) {
+                for(size_t j = i + 1; j < atlas->indecies.count; j++) {
+                    int result = entries->data[map[i]].size > entries->data[map[j]].size ? 1 : 0;
+                    if (result > 0) {
+                        size_t tempo = map[i];
+                        map[i] = map[j];
+                        map[j] = tempo;
+                    }
+                }
+            }
+            break;
+
+        case SORT_TIME_MODIFIED:
+            for(size_t i = 0; i < atlas->indecies.count; i++) {
+                for(size_t j = i + 1; j < atlas->indecies.count; j++) {
+                    int result = entries->data[map[i]].time_mofified > entries->data[map[j]].time_mofified ? 1 : 0;
+                    if (result > 0) {
+                        size_t tempo = map[i];
+                        map[i] = map[j];
+                        map[j] = tempo;
+                    }
+                }
+            }
+            break;
+
+        case SORT_NAME:
+            for(size_t i = 0; i < atlas->indecies.count; i++) {
+                for(size_t j = i + 1; j < atlas->indecies.count; j++) {
+                    int result = strcmp(atlas_get_string_at_index(atlas, map[i]), atlas_get_string_at_index(atlas, map[j]));
+                    if (result > 0) {
+                        size_t tempo = map[i];
+                        map[i] = map[j];
+                        map[j] = tempo;
+                    }
+                }
+            }
+            break;
+
+        default: break;
+    }
 }
 
 int main(int argc, char** argv) {
@@ -158,49 +221,28 @@ int main(int argc, char** argv) {
         }));
     }
 
-    size_t *sort = malloc(sizeof(sort) * atlas.indecies.count);
+    size_t *map = malloc(sizeof(map) * atlas.indecies.count);
     for(size_t i = 0; i < atlas.indecies.count; i++) {
-        sort[i] = i;
+        map[i] = i;
     }
 
-    for(size_t i = 0; i < atlas.indecies.count; i++) {
-        for(size_t j = i + 1; j < atlas.indecies.count; j++) {
-            int result = strcmp(atlas_get_string_at_index(&atlas, sort[i]), atlas_get_string_at_index(&atlas, sort[j]));
-            if (result > 0) {
-                size_t tempo = sort[i];
-                sort[i] = sort[j];
-                sort[j] = tempo;
-            }
-        }
-    }
-
-    // printf("ls:\n");
-    // for(size_t i = 0; i < entries.count; i++) {
-    //     printf("%lu:", i);
-    //     printf(" %c", entry_map_type_to_character(&entries.data[sort[i]]));
-    //     printf("%s", entry_map_permissions_to_string(&entries.data[sort[i]]).data);
-    //     printf(" %-8lu", entries.data[sort[i]].link_count);
-    //     printf("%-10s", getpwuid(entries.data[sort[i]].uid)->pw_name);
-    //     printf(" %-10s", getgrgid(entries.data[sort[i]].gid)->gr_name);
-    //     printf(" %10lu", entries.data[sort[i]].size);
-    //     printf(" %s", entry_map_time_modified_to_string(&entries.data[sort[i]]).data);
-    //     printf(" %s\n", atlas_get_string_at_index(&atlas, sort[i]));
-    // }
+    create_sorted_map(&atlas, &entries, SORT_NAME, map);
+    create_sorted_map(&atlas, &entries, SORT_SIZE, map);
 
     for(size_t i = 0; i < entries.count; i++) {
         printf("%lu:", i);
-        printf(" %c%s", entry_map_type_to_character(&entries.data[sort[i]]), entry_map_permissions_to_string(&entries.data[sort[i]]).data);
-        printf(" | %-4lu", entries.data[sort[i]].link_count);
-        printf(" | %-10s", getpwuid(entries.data[sort[i]].uid)->pw_name);
-        printf(" | %-10s", getgrgid(entries.data[sort[i]].gid)->gr_name);
-        printf(" | %10lu", entries.data[sort[i]].size);
-        printf(" | %s", entry_map_time_modified_to_string(&entries.data[sort[i]]).data);
-        printf(" | %s\n", atlas_get_string_at_index(&atlas, sort[i]));
+        printf(" %c%s", entry_convert_type_to_character(&entries.data[map[i]]), entry_convert_permissions_to_string(&entries.data[map[i]]).data);
+        printf(" | %-4lu", entries.data[map[i]].link_count);
+        printf(" | %-10s", getpwuid(entries.data[map[i]].uid)->pw_name);
+        printf(" | %-10s", getgrgid(entries.data[map[i]].gid)->gr_name);
+        printf(" | %10lu", entries.data[map[i]].size);
+        printf(" | %s", entry_convert_time_modified_to_string(&entries.data[map[i]]).data);
+        printf(" | %s\n", atlas_get_string_at_index(&atlas, map[i]));
     }
 
     atlas_free(&atlas);
     dynamic_array_free(&entries);
-    free(sort);
+    free(map);
 
     return error_none;
 }
