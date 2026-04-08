@@ -29,7 +29,7 @@ typedef struct Entry {
     uid_t uid;
     gid_t gid;
     off_t size;
-    time_t time_mofified;
+    time_t time_modified;
 } Entry;
 
 typedef struct Entries {
@@ -106,7 +106,7 @@ Time entry_convert_time_modified_to_string(Entry *entry) {
     Time time;
     int data;
     size_t index = 0;
-    struct tm* time_local = localtime(&entry->time_mofified);
+    struct tm* time_local = localtime(&entry->time_modified);
 
     index = convert(time.data, time_local->tm_year + 1900, 4, index);
     time.data[index++] = '-';
@@ -134,50 +134,55 @@ typedef enum Sort {
 } Sort;
 
 void create_sorted_map(Atlas *atlas, Entries *entries, Sort sort, size_t *map) {
+    #define bubble_sort(map, count, predicate) \
+        do { \
+            for(size_t i = 0; i < (count); i++) { \
+                for(size_t j = i + 1; j < (count); j++) { \
+                    int result = (predicate); \
+                    if (result > 0) { \
+                        size_t tempo = (map)[i]; \
+                        (map)[i] = (map)[j]; \
+                        (map)[j] = tempo; \
+                    } \
+                } \
+            } \
+        } while(0)
+
     switch(sort) {
-        case SORT_INODE: break;
-        case SORT_TYPE: break;
-        case SORT_PERMISSIONS: break;
-        case SORT_LINK_COUNT: break;
-        case SORT_UID: break;
-        case SORT_GID: break;
+        case SORT_INODE:
+            bubble_sort(map, atlas->indecies.count, entries->data[map[i]].inode > entries->data[map[j]].inode ? 1 : 0);
+            break;
+
+        case SORT_TYPE:
+            bubble_sort(map, atlas->indecies.count, entry_convert_type_to_character(&entries->data[map[i]]) > entry_convert_type_to_character(&entries->data[map[j]]) ? 1 : 0);
+            break;
+
+        case SORT_PERMISSIONS:
+            // bubble_sort(map, atlas->indecies.count, entries->data[map[i]].size > entries->data[map[j]].size ? 1 : 0);
+            // break;
+
+        case SORT_LINK_COUNT:
+            bubble_sort(map, atlas->indecies.count, entries->data[map[i]].link_count > entries->data[map[j]].link_count ? 1 : 0);
+            break;
+
+        case SORT_UID:
+            bubble_sort(map, atlas->indecies.count, entries->data[map[i]].uid > entries->data[map[j]].uid ? 1 : 0);
+            break;
+
+        case SORT_GID:
+            bubble_sort(map, atlas->indecies.count, entries->data[map[i]].gid > entries->data[map[j]].gid ? 1 : 0);
+            break;
+
         case SORT_SIZE:
-            for(size_t i = 0; i < atlas->indecies.count; i++) {
-                for(size_t j = i + 1; j < atlas->indecies.count; j++) {
-                    int result = entries->data[map[i]].size > entries->data[map[j]].size ? 1 : 0;
-                    if (result > 0) {
-                        size_t tempo = map[i];
-                        map[i] = map[j];
-                        map[j] = tempo;
-                    }
-                }
-            }
+            bubble_sort(map, atlas->indecies.count, entries->data[map[i]].size > entries->data[map[j]].size ? 1 : 0);
             break;
 
         case SORT_TIME_MODIFIED:
-            for(size_t i = 0; i < atlas->indecies.count; i++) {
-                for(size_t j = i + 1; j < atlas->indecies.count; j++) {
-                    int result = entries->data[map[i]].time_mofified > entries->data[map[j]].time_mofified ? 1 : 0;
-                    if (result > 0) {
-                        size_t tempo = map[i];
-                        map[i] = map[j];
-                        map[j] = tempo;
-                    }
-                }
-            }
+            bubble_sort(map, atlas->indecies.count, entries->data[map[i]].time_modified > entries->data[map[j]].time_modified ? 1 : 0);
             break;
 
         case SORT_NAME:
-            for(size_t i = 0; i < atlas->indecies.count; i++) {
-                for(size_t j = i + 1; j < atlas->indecies.count; j++) {
-                    int result = strcmp(atlas_get_string_at_index(atlas, map[i]), atlas_get_string_at_index(atlas, map[j]));
-                    if (result > 0) {
-                        size_t tempo = map[i];
-                        map[i] = map[j];
-                        map[j] = tempo;
-                    }
-                }
-            }
+            bubble_sort(map, atlas->indecies.count, strcmp(atlas_get_string_at_index(atlas, map[i]), atlas_get_string_at_index(atlas, map[j])));
             break;
 
         default: break;
@@ -217,7 +222,7 @@ int main(int argc, char** argv) {
             .uid = stats.st_uid,
             .gid = stats.st_gid,
             .size = stats.st_size,
-            .time_mofified = stats.st_mtime
+            .time_modified = stats.st_mtime
         }));
     }
 
@@ -227,11 +232,11 @@ int main(int argc, char** argv) {
     }
 
     create_sorted_map(&atlas, &entries, SORT_NAME, map);
-    create_sorted_map(&atlas, &entries, SORT_SIZE, map);
 
     for(size_t i = 0; i < entries.count; i++) {
         printf("%lu:", i);
         printf(" %c%s", entry_convert_type_to_character(&entries.data[map[i]]), entry_convert_permissions_to_string(&entries.data[map[i]]).data);
+        printf(" | %-8lu", entries.data[map[i]].inode);
         printf(" | %-4lu", entries.data[map[i]].link_count);
         printf(" | %-10s", getpwuid(entries.data[map[i]].uid)->pw_name);
         printf(" | %-10s", getgrgid(entries.data[map[i]].gid)->gr_name);
