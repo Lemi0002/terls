@@ -32,7 +32,7 @@ typedef enum Error {
     error_tcsetattr,
     error_read,
     error_tui_check,
-    error_tui_compile,
+    error_tui_update,
 } Error;
 
 typedef struct Entry {
@@ -570,9 +570,11 @@ int main(int argc, char** argv) {
         )
     };
     Tui_Window* scratchpad[general_array_size(windows)];
+
     Tui_Element_Scrollable scrollable = {0};
     scrollable.window = &windows[3];
     scrollable.atlas = &entry_atlas;
+    scrollable.selection_format = (String){.cstring = ASCII_MODE_ENABLE_UNDERLINE, .length = ASCII_MODE_ENABLE_UNDERLINE_LENGTH};
 
     Tui_Error tui_error = tui_check(windows, scratchpad, general_array_size(windows));
     if(tui_error != TUI_ERROR_NONE) {
@@ -590,35 +592,12 @@ int main(int argc, char** argv) {
             Tui_Bounding_Box bounding_box = {.x = 1, .y = 1, .width = terminal_size.ws_col, .height = terminal_size.ws_row};
             tui_error = tui_update(windows, scratchpad, general_array_size(windows), &bounding_box);
             if(tui_error != TUI_ERROR_NONE) {
-                return error_tui_compile;
+                return error_tui_update;
             }
-
-            const char* postfix = ASCII_CURSOR_RESTORE_POSITION_DEC ASCII_ESCAPE"[1B" ASCII_CURSOR_SAVE_POSITION_DEC;
-            const size_t postfix_length = strlen(postfix);
 
             for(size_t i = 0; i < general_array_size(windows); i++) {
                 if(windows[i].id == 1) {
                     printf(ASCII_CURSOR_MOVE_TO_POSITION "%s", windows[i].bounding_box.y, windows[i].bounding_box.x, directory_path.data);
-                } else if(windows[i].id == 3) {
-                    // printf(ASCII_CURSOR_MOVE_TO_POSITION ASCII_CURSOR_SAVE_POSITION_DEC, windows[i].bounding_box.y, windows[i].bounding_box.x);
-                    // const size_t index_max = general_min(entries.count, windows[i].bounding_box.height);
-                    // for(size_t index = 0; index < index_max; index++) {
-                    //     const String string = atlas_get_string_at_index(&entry_atlas, index);
-                    //     struct iovec write_vector[2];
-                    //     write_vector[0].iov_base = (void*)string.cstring;
-                    //     write_vector[0].iov_len = string.length - 1;
-                    //     write_vector[1].iov_base = (void*)postfix;
-                    //     write_vector[1].iov_len = postfix_length;
-                    //     writev(STDOUT_FILENO, write_vector, general_array_size(write_vector));
-                    // }
-
-                    // Tui_Element_Scrollable scrollable = {0};
-                    // tui_element_scrollable_update_selection(&scrollable, &windows[i].bounding_box, 1, false, true);
-                    // tui_element_scrollable_update_selection(&scrollable, &windows[i].bounding_box, SIZE_MAX, true, false);
-                    // tui_element_scrollable_update_selection(&scrollable, &windows[i].bounding_box, 1, true, true);
-
-                    // tui_text_scrollable(bounding_box, data, size, scroll_offset, selected);
-                    // tui_text_scrollable(bounding_box, data, size, scroll_offset, selected);
                 } else if (windows[i].id == 4) {
                     printf(ASCII_CURSOR_MOVE_TO_POSITION, windows[i].bounding_box.y, windows[i].bounding_box.x);
                     for(uint32_t dy = 0; dy < windows[i].bounding_box.height; dy++) {

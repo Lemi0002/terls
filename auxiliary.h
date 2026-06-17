@@ -362,7 +362,7 @@ typedef enum Tui_Layout {
 typedef enum Tui_Window_Kind {
     TUI_WINDOW_KIND_ROOT,
     TUI_WINDOW_KIND_LAYOUT,
-    TUI_WINDOW_KIND_TEXT,
+    TUI_WINDOW_KIND_LEAF,
 } Tui_Window_Kind;
 
 typedef struct Tui_Window Tui_Window;
@@ -421,7 +421,7 @@ typedef enum Tui_Error {
     (Tui_Window){ \
         .id = (id_child), \
         .parent = (id_parent), \
-        .kind = TUI_WINDOW_KIND_TEXT, \
+        .kind = TUI_WINDOW_KIND_LEAF, \
         .size = (size_child), \
         .bounding_box = {0}, \
         .layout = 0, \
@@ -487,7 +487,7 @@ static Tui_Error tui_check(Tui_Window* windows, Tui_Window** scratchpad, size_t 
                     return TUI_ERROR_MULTIPLE_FILL_SIZE_WINDOWS;
                 }
             } break;
-            case TUI_WINDOW_KIND_TEXT:
+            case TUI_WINDOW_KIND_LEAF:
                 break;
             default:
                 break;
@@ -558,7 +558,7 @@ static Tui_Error tui_update(Tui_Window* windows, Tui_Window** scratchpad, size_t
                 }
             } break;
 
-            case TUI_WINDOW_KIND_TEXT:
+            case TUI_WINDOW_KIND_LEAF:
                 break;
             default:
                 break;
@@ -573,6 +573,7 @@ typedef struct Tui_Element_Scrollable {
     size_t offset;
     size_t selection;
     Atlas* atlas;
+    String selection_format;
 } Tui_Element_Scrollable;
 
 static void tui_element_scrollable_update_selection(Tui_Element_Scrollable* scrollable, size_t value, bool positive, bool relative) {
@@ -611,12 +612,12 @@ static void tui_element_scrollable_update_selection(Tui_Element_Scrollable* scro
 
     printf(ASCII_CURSOR_MOVE_TO_POSITION ASCII_CURSOR_SAVE_POSITION_DEC, scrollable->window->bounding_box.y, scrollable->window->bounding_box.x);
 
-    const char* postfix = ASCII_CURSOR_RESTORE_POSITION_DEC ASCII_ESCAPE"[1B" ASCII_CURSOR_SAVE_POSITION_DEC;
-    const size_t postfix_length = strlen(postfix);
-    const char* selection_prefix = ASCII_COLOR_BACKGROUND_BLUE;
-    const size_t selection_prefix_length = strlen(selection_prefix);
-    const char* selection_postifx = ASCII_RESET;
-    const size_t selection_postfix_length = strlen(selection_postifx);
+    const char postfix[] = ASCII_CURSOR_RESTORE_POSITION_DEC ASCII_ESCAPE"[1B" ASCII_CURSOR_SAVE_POSITION_DEC;
+    const size_t postfix_length = general_array_size(postfix);
+    const char* selection_prefix = scrollable->selection_format.cstring;
+    const size_t selection_prefix_length = scrollable->selection_format.length;
+    const char selection_postifx[] = ASCII_RESET;
+    const size_t selection_postfix_length = general_array_size(selection_postifx);
     const size_t index_max = general_min(scrollable->atlas->indecies.count, scrollable->offset + scrollable->window->bounding_box.height);
 
     for(size_t index = scrollable->offset; index < index_max; index++) {
