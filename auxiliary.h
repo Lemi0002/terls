@@ -39,6 +39,8 @@
         (dynamic_array)->count++; \
     } while (0)
 
+#define dynamic_array_reset(dynamic_array) ((dynamic_array)->count = 0)
+
 typedef struct String {
     char* cstring;
     size_t length;
@@ -63,7 +65,7 @@ static void string_builder_reserve(String_Builder* string_builder, size_t count)
 }
 
 static void string_builder_reset(String_Builder* string_builder) {
-    string_builder->count = 0;
+    dynamic_array_reset(string_builder);
     string_builder->control_character_count = 0;
 }
 
@@ -153,6 +155,11 @@ static String atlas_get_string_at_index(Atlas* atlas, size_t index) {
         .cstring = &atlas->string_builder.data[atlas->indecies.data[index].head],
         .length = atlas->indecies.data[index].length
     };
+}
+
+static void atlas_reset(Atlas *atlas) {
+    dynamic_array_reset(&atlas->indecies);
+    string_builder_reset(&atlas->string_builder);
 }
 
 static void atlas_free(Atlas* atlas) {
@@ -574,9 +581,14 @@ typedef struct Tui_Element_Scrollable {
     size_t selection;
     Atlas* atlas;
     String selection_format;
+
+    bool atlas_changed;
+    size_t offset_previous;
+    size_t selection_previous;
+    size_t index_max_previous;
 } Tui_Element_Scrollable;
 
-static void tui_element_scrollable_update_selection(Tui_Element_Scrollable* scrollable, size_t value, bool positive, bool relative) {
+static void tui_element_scrollable_update(Tui_Element_Scrollable* scrollable, size_t value, bool positive, bool relative) {
     if (relative) {
         if (positive) {
             if (SIZE_MAX - scrollable->selection >= value) {
@@ -609,47 +621,107 @@ static void tui_element_scrollable_update_selection(Tui_Element_Scrollable* scro
     } else if(scrollable->selection >= (scrollable->offset + scrollable->window->bounding_box.height)) {
         scrollable->offset = scrollable->selection - scrollable->window->bounding_box.height + 1;
     }
+}
 
-    printf(ASCII_CURSOR_MOVE_TO_POSITION ASCII_CURSOR_SAVE_POSITION_DEC, scrollable->window->bounding_box.y, scrollable->window->bounding_box.x);
+static void __tui_element_scrollable_comulative_write(struct iovec *const write_vector, const size_t write_length, size_t *const write_count, const char *data, const size_t data_length, size_t fill_width) {
+    while(fill_width > 0) {
+        while(*write_count < write_length) {
+            size_t width;
+            if (fill_width >= data_length) {
+                width = data_length;
+                fill_width -= data_length;
+            } else {
+                width = fill_width;
+                fill_width = 0;
+            }
 
+            write_vector[*write_count].iov_base = (void*)data;
+            write_vector[*write_count].iov_len = width;
+            (*write_count)++;
+
+            if (fill_width == 0) {
+                return;
+            }
+        }
+
+        assert(fill_width > 0);
+        writev(STDOUT_FILENO, write_vector, *write_count);
+        *write_count = 0;
+    }
+}
+
+static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
     const char postfix[] = ASCII_CURSOR_RESTORE_POSITION_DEC ASCII_ESCAPE"[1B" ASCII_CURSOR_SAVE_POSITION_DEC;
-    const size_t postfix_length = general_array_size(postfix);
+    const size_t postfix_length = general_array_size(postfix) - 1;
     const char* selection_prefix = scrollable->selection_format.cstring;
     const size_t selection_prefix_length = scrollable->selection_format.length;
     const char selection_postifx[] = ASCII_RESET;
-    const size_t selection_postfix_length = general_array_size(selection_postifx);
+    const size_t selection_postfix_length = general_array_size(selection_postifx) - 1;
+    const char fill[] = "****************************************";
+    const size_t fill_length = general_array_size(fill) - 1;
+
     const size_t index_max = general_min(scrollable->atlas->indecies.count, scrollable->offset + scrollable->window->bounding_box.height);
+
+    struct iovec write_vector[20];
+    size_t write_count = 0;
+
+    printf(ASCII_CURSOR_MOVE_TO_POSITION ASCII_CURSOR_SAVE_POSITION_DEC, scrollable->window->bounding_box.y, scrollable->window->bounding_box.x);
 
     for(size_t index = scrollable->offset; index < index_max; index++) {
         const String string = atlas_get_string_at_index(scrollable->atlas, index);
-        //const size_t length_max = general_min(scrollable->atlas->indecies.data[index].length - 1, scrollable->window->bounding_box.width);
 
         if (scrollable->atlas->indecies.data[index].length_visible > scrollable->window->bounding_box.width) {
             continue;
         }
 
+        assert(general_array_size(write_vector) >= 4);
+        assert(fill_length >= 1);
         const size_t length_max = scrollable->atlas->indecies.data[index].length;
+        const size_t fill_width = scrollable->window->bounding_box.width - scrollable->atlas->indecies.data[index].length_visible;
 
         if (index == scrollable->selection) {
-            struct iovec write_vector[4];
-            write_vector[0].iov_base = (void*)selection_prefix;
-            write_vector[0].iov_len = selection_prefix_length;
-            write_vector[1].iov_base = (void*)string.cstring;
-            write_vector[1].iov_len = length_max;
-            write_vector[2].iov_base = (void*)selection_postifx;
-            write_vector[2].iov_len = selection_postfix_length;
-            write_vector[3].iov_base = (void*)postfix;
-            write_vector[3].iov_len = postfix_length;
-            writev(STDOUT_FILENO, write_vector, general_array_size(write_vector));
+            write_vector[write_count].iov_base = (void*)selection_prefix;
+            write_vector[write_count].iov_len = selection_prefix_length;
+            write_count++;
+            write_vector[write_count].iov_base = (void*)string.cstring;
+            write_vector[write_count].iov_len = length_max;
+            write_count++;
+            write_vector[write_count].iov_base = (void*)selection_postifx;
+            write_vector[write_count].iov_len = selection_postfix_length;
+            write_count++;
         } else {
-            struct iovec write_vector[2];
-            write_vector[0].iov_base = (void*)string.cstring;
-            write_vector[0].iov_len = length_max;
-            write_vector[1].iov_base = (void*)postfix;
-            write_vector[1].iov_len = postfix_length;
-            writev(STDOUT_FILENO, write_vector, general_array_size(write_vector));
+            write_vector[write_count].iov_base = (void*)string.cstring;
+            write_vector[write_count].iov_len = length_max;
+            write_count++;
         }
+
+        __tui_element_scrollable_comulative_write(write_vector, general_array_size(write_vector) - 1, &write_count, fill, fill_length, fill_width);
+
+        assert(write_count < general_array_size(write_vector));
+        write_vector[write_count].iov_base = (void*)postfix;
+        write_vector[write_count].iov_len = postfix_length;
+        write_count++;
+        writev(STDOUT_FILENO, write_vector, write_count);
     }
+
+    for (size_t index = index_max; index < scrollable->index_max_previous; index++) {
+        assert(general_array_size(write_vector) >= 1);
+        assert(fill_length >= 1);
+        const size_t fill_width = scrollable->window->bounding_box.width;
+
+        __tui_element_scrollable_comulative_write(write_vector, general_array_size(write_vector) - 1, &write_count, fill, fill_length, fill_width);
+
+        assert(write_count < general_array_size(write_vector));
+        write_vector[write_count].iov_base = (void*)postfix;
+        write_vector[write_count].iov_len = postfix_length;
+        write_count++;
+        writev(STDOUT_FILENO, write_vector, write_count);
+    }
+
+    scrollable->offset_previous = scrollable->offset;
+    scrollable->selection_previous = scrollable->selection;
+    scrollable->index_max_previous = index_max;
+    //todo
 }
 
 #endif

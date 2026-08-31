@@ -51,6 +51,30 @@ typedef struct Entries {
     size_t count;
 } Entries;
 
+typedef struct Map {
+    size_t *data;
+    size_t size;
+    size_t count;
+} Map;
+
+typedef struct Record {
+    Entries entries;
+    Atlas names;
+    Map map;
+} Record;
+
+void record_reset(Record *record) {
+    atlas_reset(&record->names);
+    dynamic_array_reset(&record->entries);
+    dynamic_array_reset(&record->map);
+}
+
+void record_free(Record *record) {
+    atlas_free(&record->names);
+    dynamic_array_free(&record->entries);
+    dynamic_array_free(&record->map);
+}
+
 char entry_convert_type_to_character(Entry *entry) {
     char value;
     switch(entry->mode & S_IFMT) {
@@ -86,47 +110,7 @@ enum {
     MODE_PERMISSIONS_MASK = (1 << MODE_PERMISSIONS_WIDTH) - 1
 };
 
-// typedef struct Mode {
-//     char data[MODE_PERMISSIONS_WIDTH + 1];
-// } Mode;
-//
-// Mode entry_convert_permissions_to_string(Entry *entry) {
-//     Mode mode;
-//     for(size_t i = 0; i < sizeof(mode) - 1; ++i) {
-//         if (entry->mode & (1 << (sizeof(mode) - 2 - i))) {
-//             switch(i % 3) {
-//                 case 0: mode.data[i] = 'r'; break;
-//                 case 1: mode.data[i] = 'w'; break;
-//                 case 2: mode.data[i] = 'x'; break;
-//             }
-//         } else {
-//             mode.data[i] = '-';
-//         }
-//     }
-//
-//     mode.data[sizeof(mode) - 1] = 0;
-//     return mode;
-// }
-
-size_t entry_convert_permissions_to_string_buffer(char * const buffer, const size_t offset, Entry *entry) {
-    const size_t width = 9;
-    for(size_t i = 0; i < width; ++i) {
-        if (entry->mode & (1 << (width - 1 - i))) {
-            switch(i % 3) {
-                case 0: buffer[offset + i] = 'r'; break;
-                case 1: buffer[offset + i] = 'w'; break;
-                case 2: buffer[offset + i] = 'x'; break;
-            }
-        } else {
-            buffer[offset + i] = '-';
-        }
-    }
-
-    return width;
-}
-
-
-void entry_append_permissions(String_Builder* string_builder, Entry *entry) {
+void entry_append_permissions(Entry *entry, String_Builder* string_builder) {
     const size_t width = 9;
     for(size_t i = 0; i < width; ++i) {
         if (entry->mode & (1 << (width - 1 - i))) {
@@ -141,44 +125,7 @@ void entry_append_permissions(String_Builder* string_builder, Entry *entry) {
     }
 }
 
-// typedef struct Time {
-//     char data[17];
-// } Time;
-
-// Time entry_convert_time_modified_to_string(Entry *entry) {
-//     Time time;
-//     size_t index = 0;
-//     struct tm* time_local = localtime(&entry->time_modified);
-//
-//     index += buffer_append_integer(time.data, index, time_local->tm_year + 1900, 4, '0');
-//     time.data[index++] = '-';
-//     index += buffer_append_integer(time.data, index, time_local->tm_mon, 2, '0');
-//     time.data[index++] = '-';
-//     index += buffer_append_integer(time.data, index, time_local->tm_mday, 2, '0');
-//     time.data[index++] = ' ';
-//     index += buffer_append_integer(time.data, index, time_local->tm_hour, 2, '0');
-//     time.data[index++] = ':';
-//     index += buffer_append_integer(time.data, index, time_local->tm_min, 2, '0');
-//     time.data[index++] = 0;
-//     return time;
-// }
-
-size_t entry_convert_time_modified_to_string_buffer(char * buffer, size_t offset, Entry *entry) {
-    struct tm* time_local = localtime(&entry->time_modified);
-
-    offset += buffer_append_integer(buffer, offset, time_local->tm_year + 1900, 4, '0');
-    offset += buffer_append_character(buffer, offset, '-');
-    offset += buffer_append_integer(buffer, offset, time_local->tm_mon, 2, '0');
-    offset += buffer_append_character(buffer, offset, '-');
-    offset += buffer_append_integer(buffer, offset, time_local->tm_mday, 2, '0');
-    offset += buffer_append_character(buffer, offset, ' ');
-    offset += buffer_append_integer(buffer, offset, time_local->tm_hour, 2, '0');
-    offset += buffer_append_character(buffer, offset, ':');
-    offset += buffer_append_integer(buffer, offset, time_local->tm_min, 2, '0');
-    return 16;
-}
-
-void entry_append_time_modified(String_Builder* string_builder, Entry *entry) {
+void entry_append_time_modified(Entry *entry, String_Builder* string_builder) {
     struct tm* time_local = localtime(&entry->time_modified);
 
     string_builder_append_integer(string_builder, time_local->tm_year + 1900, 4, '0');
@@ -219,9 +166,10 @@ typedef enum Sort {
         } \
     } while(0)
 
-void entry_create_sorted_map(Entries *const entries, Atlas *const atlas, Sort sort, size_t *const map) {
-    for(size_t i = 0; i < atlas->indecies.count; i++) {
-        map[i] = i;
+void record_create_sorted_map(Record *record, Sort sort) {
+    dynamic_array_reset(&record->map);
+    for(size_t i = 0; i < record->names.indecies.count; i++) {
+        dynamic_array_append(&record->map, i);
     }
 
     switch(sort) {
@@ -229,39 +177,75 @@ void entry_create_sorted_map(Entries *const entries, Atlas *const atlas, Sort so
             break;
 
         case SORT_INODE:
-            bubble_sort_lambda(map, entries->count, entries->data[map[i]].inode > entries->data[map[j]].inode ? 1 : 0);
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                record->entries.data[record->map.data[i]].inode > record->entries.data[record->map.data[j]].inode ? 1 : 0
+            );
             break;
 
         case SORT_TYPE:
-            bubble_sort_lambda(map, entries->count, entry_convert_type_to_character(&entries->data[map[i]]) > entry_convert_type_to_character(&entries->data[map[j]]) ? 1 : 0);
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                entry_convert_type_to_character(&record->entries.data[record->map.data[i]]) > entry_convert_type_to_character(&record->entries.data[record->map.data[j]]) ? 1 : 0
+            );
             break;
 
         case SORT_PERMISSIONS:
-            bubble_sort_lambda(map, entries->count, (entries->data[map[i]].mode & MODE_PERMISSIONS_MASK) > (entries->data[map[j]].mode & MODE_PERMISSIONS_MASK) ? 1 : 0);
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                (record->entries.data[record->map.data[i]].mode & MODE_PERMISSIONS_MASK) > (record->entries.data[record->map.data[j]].mode & MODE_PERMISSIONS_MASK) ? 1 : 0
+            );
             break;
 
         case SORT_LINK_COUNT:
-            bubble_sort_lambda(map, entries->count, entries->data[map[i]].link_count > entries->data[map[j]].link_count ? 1 : 0);
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                record->entries.data[record->map.data[i]].link_count > record->entries.data[record->map.data[j]].link_count ? 1 : 0
+            );
             break;
 
         case SORT_UID:
-            bubble_sort_lambda(map, entries->count, entries->data[map[i]].uid > entries->data[map[j]].uid ? 1 : 0);
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                record->entries.data[record->map.data[i]].uid > record->entries.data[record->map.data[j]].uid ? 1 : 0
+            );
             break;
 
         case SORT_GID:
-            bubble_sort_lambda(map, entries->count, entries->data[map[i]].gid > entries->data[map[j]].gid ? 1 : 0);
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                record->entries.data[record->map.data[i]].gid > record->entries.data[record->map.data[j]].gid ? 1 : 0
+            );
             break;
 
         case SORT_SIZE:
-            bubble_sort_lambda(map, entries->count, entries->data[map[i]].size > entries->data[map[j]].size ? 1 : 0);
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                record->entries.data[record->map.data[i]].size > record->entries.data[record->map.data[j]].size ? 1 : 0
+            );
             break;
 
         case SORT_TIME_MODIFIED:
-            bubble_sort_lambda(map, entries->count, entries->data[map[i]].time_modified > entries->data[map[j]].time_modified ? 1 : 0);
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                record->entries.data[record->map.data[i]].time_modified > record->entries.data[record->map.data[j]].time_modified ? 1 : 0
+            );
             break;
 
         case SORT_NAME:
-            bubble_sort_lambda(map, entries->count, strcmp(atlas_get_cstring_at_index(atlas, map[i]), atlas_get_cstring_at_index(atlas, map[j])));
+            bubble_sort_lambda(
+                record->map.data,
+                record->entries.count,
+                strcmp(atlas_get_cstring_at_index(&record->names, record->map.data[i]), atlas_get_cstring_at_index(&record->names, record->map.data[j]))
+            );
             break;
 
         default: break;
@@ -344,16 +328,17 @@ void signal_callback(int signal) {
     }
 }
 
-Error entry_read_directory(char* directory, Atlas* entry_names, Entries* entries) {
-    DIR* directory_stream = opendir(directory);
+Error record_read_directory(Record *record, String directory) {
+    DIR* directory_stream = opendir(directory.cstring);
     if (directory_stream == NULL) {
         return error_opendir;
     }
 
+    errno = 0;
     struct dirent* entry = readdir(directory_stream);
 
     while (entry != NULL) {
-        atlas_append_cstring(entry_names, entry->d_name);
+        atlas_append_cstring(&record->names, entry->d_name);
         entry = readdir(directory_stream);
     }
 
@@ -361,27 +346,28 @@ Error entry_read_directory(char* directory, Atlas* entry_names, Entries* entries
         return error_readdir;
     }
 
-    if (entry_names->indecies.count == 0) {
+    if (record->names.indecies.count == 0) {
         return error_none;
     }
 
     String_Builder path = {0};
 
-    for(size_t i = 0; i < entry_names->indecies.count; i++) {
+    for(size_t i = 0; i < record->names.indecies.count; i++) {
         struct stat stats;
         string_builder_reset(&path);
-        string_builder_append_cstring(&path, directory);
+        string_builder_append_string(&path, directory);
         if (path.data[path.count - 1] != '/') {
             string_builder_append_character(&path, '/');
         }
-        string_builder_append_cstring(&path, atlas_get_cstring_at_index(entry_names, i));
+        string_builder_append_string(&path, atlas_get_string_at_index(&record->names, i));
         string_builder_append_character(&path, 0);
 
         if (lstat(path.data, &stats) < 0) {
+            string_builder_free(&path);
             return error_stat;
         }
 
-        dynamic_array_append(entries, ((Entry){
+        dynamic_array_append(&record->entries, ((Entry){
             .inode = stats.st_ino,
             .mode = stats.st_mode,
             .link_count = stats.st_nlink,
@@ -396,143 +382,92 @@ Error entry_read_directory(char* directory, Atlas* entry_names, Entries* entries
     return error_none;
 }
 
-void entry_print(Atlas* entry_names, Entries* entries, size_t* map) {
-    int index_width = width_integer(entries->count);
+void record_convert_to_atlas(Record *record, Atlas* atlas) {
+    int index_width = width_integer(record->entries.count);
     int inode_width;
     int link_count_width;
     int size_width;
     int uid_width;
     int gid_width;
 
-    integer_max_lambda(entries->count, width_integer(entries->data[i].inode), &inode_width);
-    integer_max_lambda(entries->count, width_integer(entries->data[i].link_count), &link_count_width);
-    integer_max_lambda(entries->count, width_integer(entries->data[i].size), &size_width);
-    integer_max_lambda(entries->count, width_integer(entries->data[i].uid), &uid_width);
-    integer_max_lambda(entries->count, width_integer(entries->data[i].gid), &gid_width);
-    // integer_max_lambda(entries.count, width_string(getpwuid(entries.data[i].uid)->pw_name), &uid_width);
-    // integer_max_lambda(entries.count, width_string(getgrgid(entries.data[i].gid)->gr_name), &gid_width);
+    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].inode), &inode_width);
+    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].link_count), &link_count_width);
+    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].size), &size_width);
+    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].uid), &uid_width);
+    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].gid), &gid_width);
 
-    Atlas output = {0};
-    char buffer[1000024] = {0};
-    size_t offset = 0;
-
-    // clock_t start_2 = clock();
-    // for(size_t i = 0; i < entries->count; i++) {
-    //     offset += buffer_append_cstring(buffer, offset, ASCII_MODE_ENABLE_DIM);
-    //     offset += buffer_append_integer(buffer, offset, i + 1, index_width, ' ');
-    //     offset += buffer_append_cstring(buffer, offset, ":" ASCII_MODE_DISABLE_DIM " ");
-    //     offset += buffer_append_character(buffer, offset, entry_convert_type_to_character(&entries->data[map[i]]));
-    //     offset += entry_convert_permissions_to_string_buffer(buffer, offset, &entries->data[map[i]]);
-    //     offset += buffer_append_character(buffer, offset, ' ');
-    //     offset += buffer_append_integer(buffer, offset, entries->data[map[i]].inode, inode_width, ' ');
-    //     offset += buffer_append_character(buffer, offset, ' ');
-    //     offset += buffer_append_integer(buffer, offset, entries->data[map[i]].link_count, link_count_width, ' ');
-    //     offset += buffer_append_character(buffer, offset, ' ');
-    //     offset += buffer_append_integer(buffer, offset, entries->data[map[i]].uid, uid_width, ' ');
-    //     offset += buffer_append_character(buffer, offset, ' ');
-    //     offset += buffer_append_integer(buffer, offset, entries->data[map[i]].gid, gid_width, ' ');
-    //     offset += buffer_append_character(buffer, offset, ' ');
-    //     offset += buffer_append_integer(buffer, offset, entries->data[map[i]].size, size_width, ' ');
-    //     offset += buffer_append_character(buffer, offset, ' ');
-    //     offset += entry_convert_time_modified_to_string_buffer(buffer, offset, &entries->data[map[i]]);
-    //     offset += buffer_append_character(buffer, offset, ' ');
-    //     offset += buffer_append_cstring(buffer, offset, atlas_get_cstring_at_index(entry_names, map[i]));
-    //     offset += buffer_append_character(buffer, offset, '\n');
-    // }
-    // offset += buffer_append_character(buffer, offset, 0);
-    // write(STDOUT_FILENO, buffer, offset - 1);
-    // clock_t stop_2 = clock();
-
-    // clock_t start_1 = clock();
-    // for(size_t i = 0; i < entries->count; i++) {
-    //     String_Builder* string_builder = atlas_string_builder_begin(&output);
-    //     string_builder_append_cstring(string_builder, ASCII_MODE_ENABLE_DIM);
-    //     string_builder_append_integer(string_builder, i + 1, index_width, ' ');
-    //     string_builder_append_cstring(string_builder, ":" ASCII_MODE_DISABLE_DIM " ");
-    //     string_builder_append_character(string_builder, entry_convert_type_to_character(&entries->data[map[i]]));
-    //     entry_append_permissions(string_builder, &entries->data[map[i]]);
-    //     string_builder_append_character(string_builder, ' ');
-    //     string_builder_append_integer(string_builder, entries->data[map[i]].inode, inode_width, ' ');
-    //     string_builder_append_character(string_builder, ' ');
-    //     string_builder_append_integer(string_builder, entries->data[map[i]].link_count, link_count_width, ' ');
-    //     string_builder_append_character(string_builder, ' ');
-    //     string_builder_append_integer(string_builder, entries->data[map[i]].uid, uid_width, ' ');
-    //     string_builder_append_character(string_builder, ' ');
-    //     string_builder_append_integer(string_builder, entries->data[map[i]].gid, gid_width, ' ');
-    //     string_builder_append_character(string_builder, ' ');
-    //     string_builder_append_integer(string_builder, entries->data[map[i]].size, size_width, ' ');
-    //     string_builder_append_character(string_builder, ' ');
-    //     entry_append_time_modified(string_builder, &entries->data[map[i]]);
-    //     string_builder_append_character(string_builder, ' ');
-    //     string_builder_append_cstring(string_builder, atlas_get_cstring_at_index(entry_names, map[i]));
-    //     string_builder_append_character(string_builder, '\n');
-    //     atlas_string_builder_end(&output);
-    // }
-    // clock_t stop_1 = clock();
-
-    // printf("Elapsed 2: %f seconds\n", (double)(stop_2 - start_2) / CLOCKS_PER_SEC);
-    // printf("Elapsed 1: %f seconds\n", (double)(stop_1 - start_1) / CLOCKS_PER_SEC);
-}
-
-void entry_convert_to_atlas(Entries* entries, Atlas* entry_names, size_t* map, Atlas* atlas) {
-    int index_width = width_integer(entries->count);
-    int inode_width;
-    int link_count_width;
-    int size_width;
-    int uid_width;
-    int gid_width;
-
-    integer_max_lambda(entries->count, width_integer(entries->data[i].inode), &inode_width);
-    integer_max_lambda(entries->count, width_integer(entries->data[i].link_count), &link_count_width);
-    integer_max_lambda(entries->count, width_integer(entries->data[i].size), &size_width);
-    integer_max_lambda(entries->count, width_integer(entries->data[i].uid), &uid_width);
-    integer_max_lambda(entries->count, width_integer(entries->data[i].gid), &gid_width);
-
-    for(size_t i = 0; i < entries->count; i++) {
+    for(size_t i = 0; i < record->entries.count; i++) {
         String_Builder* string_builder = atlas_string_builder_begin(atlas);
         string_builder_append_cstring(string_builder, ASCII_MODE_ENABLE_DIM);
         string_builder_append_integer(string_builder, i + 1, index_width, ' ');
         string_builder_append_cstring(string_builder, ":" ASCII_MODE_DISABLE_DIM " ");
         string_builder_increment_control_character_count(string_builder, ASCII_MODE_ENABLE_DIM_LENGTH + ASCII_MODE_DISABLE_DIM_LENGTH);
-        string_builder_append_character(string_builder, entry_convert_type_to_character(&entries->data[map[i]]));
-        entry_append_permissions(string_builder, &entries->data[map[i]]);
+        string_builder_append_character(string_builder, entry_convert_type_to_character(&record->entries.data[record->map.data[i]]));
+        entry_append_permissions(&record->entries.data[record->map.data[i]], string_builder);
         string_builder_append_character(string_builder, ' ');
-        string_builder_append_integer(string_builder, entries->data[map[i]].inode, inode_width, ' ');
+        string_builder_append_integer(string_builder, record->entries.data[record->map.data[i]].inode, inode_width, ' ');
         string_builder_append_character(string_builder, ' ');
-        string_builder_append_integer(string_builder, entries->data[map[i]].link_count, link_count_width, ' ');
+        string_builder_append_integer(string_builder, record->entries.data[record->map.data[i]].link_count, link_count_width, ' ');
         string_builder_append_character(string_builder, ' ');
-        string_builder_append_integer(string_builder, entries->data[map[i]].uid, uid_width, ' ');
+        string_builder_append_integer(string_builder, record->entries.data[record->map.data[i]].uid, uid_width, ' ');
         string_builder_append_character(string_builder, ' ');
-        string_builder_append_integer(string_builder, entries->data[map[i]].gid, gid_width, ' ');
+        string_builder_append_integer(string_builder, record->entries.data[record->map.data[i]].gid, gid_width, ' ');
         string_builder_append_character(string_builder, ' ');
-        string_builder_append_integer(string_builder, entries->data[map[i]].size, size_width, ' ');
+        string_builder_append_integer(string_builder, record->entries.data[record->map.data[i]].size, size_width, ' ');
         string_builder_append_character(string_builder, ' ');
-        entry_append_time_modified(string_builder, &entries->data[map[i]]);
+        entry_append_time_modified(&record->entries.data[record->map.data[i]], string_builder);
         string_builder_append_character(string_builder, ' ');
-        string_builder_append_cstring(string_builder, atlas_get_cstring_at_index(entry_names, map[i]));
+        string_builder_append_string(string_builder, atlas_get_string_at_index(&record->names, record->map.data[i]));
         atlas_string_builder_end(atlas);
     }
 }
 
-// void entry_print_atlas(Tui_Element_Scrollable* scrollable, Atlas* atlas, Tui_Bounding_Box* bounding_box) {
-//
-// }
+Error app_update_preview(Record *record_main, size_t selection, Record *record_preview, Atlas *record_preview_atlas, String directory) {
+    const size_t index = record_main->map.data[selection];
+    Entry *const entry = &record_main->entries.data[index];
+    const String entry_name = atlas_get_string_at_index(&record_main->names, index);
 
-int main(int argc, char** argv) {
-    char* directory;
+    if (entry_convert_type_to_character(entry) == 'd') {
+        String_Builder path = {0};
 
-    if (argc == 1) {
-        directory = "./";
-    } else {
-        directory = argv[1];
+        record_reset(record_preview);
+        atlas_reset(record_preview_atlas);
+
+        string_builder_append_string(&path, directory);
+        if (path.data[path.count - 1] != '/') {
+            string_builder_append_character(&path, '/');
+        }
+        string_builder_append_string(&path, entry_name);
+        string_builder_append_character(&path, 0);
+
+        Error error = record_read_directory(record_preview, string_from_cstring(path.data));
+        if (error != error_none) {
+            return error;
+        }
+
+        record_create_sorted_map(record_preview, SORT_NAME);
+        record_convert_to_atlas(record_preview, record_preview_atlas);
     }
 
-    errno = 0;
-    Error error;
-    Atlas entry_names = {0};
-    Entries entries = {0};
+    return error_none;
+}
 
-    error = entry_read_directory(directory, &entry_names, &entries);
+int main(int argc, char** argv) {
+    String directory;
+
+    if (argc == 1) {
+        directory = string_from_cstring("./");
+    } else {
+        directory = string_from_cstring(argv[1]);
+    }
+
+    Error error;
+    Record record_main = {.entries = {0}, .names = {0}, .map = {0}};
+    Record record_preview = {.entries = {0}, .names = {0}, .map = {0}};
+    Atlas record_main_atlas = {0};
+    Atlas record_preview_atlas = {0};
+
+    error = record_read_directory(&record_main, directory);
     if (error != error_none) {
         return error;
     }
@@ -543,11 +478,8 @@ int main(int argc, char** argv) {
         return error_getcwd;
     }
 
-    size_t *map = malloc(sizeof(map) * entries.count);
-    entry_create_sorted_map(&entries, &entry_names, SORT_NAME, map);
-
-    Atlas entry_atlas = {0};
-    entry_convert_to_atlas(&entries, &entry_names, map, &entry_atlas);
+    record_create_sorted_map(&record_main, SORT_NAME);
+    record_convert_to_atlas(&record_main, &record_main_atlas);
 
     struct termios settings_saved;
     error = terminal_apply_settings(&settings_saved);
@@ -569,14 +501,19 @@ int main(int argc, char** argv) {
             tui_window_make_element(0, 6, tui_size_make_fixed(1))
         )
     };
-    Tui_Window* scratchpad[general_array_size(windows)];
+    Tui_Window* windows_scratchpad[general_array_size(windows)];
 
-    Tui_Element_Scrollable scrollable = {0};
-    scrollable.window = &windows[3];
-    scrollable.atlas = &entry_atlas;
-    scrollable.selection_format = (String){.cstring = ASCII_MODE_ENABLE_UNDERLINE, .length = ASCII_MODE_ENABLE_UNDERLINE_LENGTH};
+    Tui_Element_Scrollable scrollable_main = {0};
+    scrollable_main.window = &windows[3];
+    scrollable_main.atlas = &record_main_atlas;
+    scrollable_main.selection_format = (String){.cstring = ASCII_MODE_ENABLE_UNDERLINE, .length = ASCII_MODE_ENABLE_UNDERLINE_LENGTH};
 
-    Tui_Error tui_error = tui_check(windows, scratchpad, general_array_size(windows));
+    Tui_Element_Scrollable scrollable_preview = {0};
+    scrollable_preview.window = &windows[5];
+    scrollable_preview.atlas = &record_preview_atlas;
+    scrollable_preview.selection_format = (String){.cstring = "", .length = 0};
+
+    Tui_Error tui_error = tui_check(windows, windows_scratchpad, general_array_size(windows));
     if(tui_error != TUI_ERROR_NONE) {
         return error_tui_check;
     }
@@ -590,7 +527,7 @@ int main(int argc, char** argv) {
             );
 
             Tui_Bounding_Box bounding_box = {.x = 1, .y = 1, .width = terminal_size.ws_col, .height = terminal_size.ws_row};
-            tui_error = tui_update(windows, scratchpad, general_array_size(windows), &bounding_box);
+            tui_error = tui_update(windows, windows_scratchpad, general_array_size(windows), &bounding_box);
             if(tui_error != TUI_ERROR_NONE) {
                 return error_tui_update;
             }
@@ -606,7 +543,12 @@ int main(int argc, char** argv) {
                 }
             }
 
-            tui_element_scrollable_update_selection(&scrollable, 0, true, true);
+            tui_element_scrollable_update(&scrollable_main, 0, true, true);
+            app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, directory);
+            tui_element_scrollable_update(&scrollable_preview, 0, true, true);
+
+            tui_element_scrollable_draw(&scrollable_main);
+            tui_element_scrollable_draw(&scrollable_preview);
         }
 
         ssize_t count = read(STDIN_FILENO, &input, 1);
@@ -616,11 +558,25 @@ int main(int argc, char** argv) {
             switch(input) {
                 case 'q': break;
                 case 'j':
-                    tui_element_scrollable_update_selection(&scrollable, 1, true, true);
+                    tui_element_scrollable_update(&scrollable_main, 1, true, true);
+                    app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, directory);
+                    scrollable_preview.atlas_changed = true;
+                    tui_element_scrollable_update(&scrollable_preview, 0, true, true);
+
+                    tui_element_scrollable_draw(&scrollable_main);
+                    tui_element_scrollable_draw(&scrollable_preview);
                     break;
+
                 case 'k': 
-                    tui_element_scrollable_update_selection(&scrollable, 1, false, true);
+                    tui_element_scrollable_update(&scrollable_main, 1, false, true);
+                    app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, directory);
+                    scrollable_preview.atlas_changed = true;
+                    tui_element_scrollable_update(&scrollable_preview, 0, true, true);
+
+                    tui_element_scrollable_draw(&scrollable_main);
+                    tui_element_scrollable_draw(&scrollable_preview);
                     break;
+
                 case 'h': printf(ASCII_CURSOR_MOVE_LEFT, 1); break;
                 case 'l': printf(ASCII_CURSOR_MOVE_RIGHT, 1); break;
                 default: break;
@@ -635,9 +591,9 @@ int main(int argc, char** argv) {
         return error;
     }
 
-    free(map);
-    atlas_free(&entry_names);
-    dynamic_array_free(&entries);
+    record_free(&record_main);
+    atlas_free(&record_main_atlas);
+    string_builder_free(&directory_path);
 
     return error_none;
 }
