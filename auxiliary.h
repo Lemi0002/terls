@@ -663,7 +663,6 @@ static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
     const size_t index_max = general_min(scrollable->atlas->indecies.count, scrollable->offset + scrollable->window->bounding_box.height);
 
     struct iovec write_vector[20];
-    size_t write_count = 0;
 
     printf(ASCII_CURSOR_MOVE_TO_POSITION ASCII_CURSOR_SAVE_POSITION_DEC, scrollable->window->bounding_box.y, scrollable->window->bounding_box.x);
 
@@ -678,6 +677,7 @@ static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
         assert(fill_length >= 1);
         const size_t length_max = scrollable->atlas->indecies.data[index].length;
         const size_t fill_width = scrollable->window->bounding_box.width - scrollable->atlas->indecies.data[index].length_visible;
+        size_t write_count = 0;
 
         if (index == scrollable->selection) {
             write_vector[write_count].iov_base = (void*)selection_prefix;
@@ -708,6 +708,7 @@ static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
         assert(general_array_size(write_vector) >= 1);
         assert(fill_length >= 1);
         const size_t fill_width = scrollable->window->bounding_box.width;
+        size_t write_count = 0;
 
         __tui_element_scrollable_comulative_write(write_vector, general_array_size(write_vector) - 1, &write_count, fill, fill_length, fill_width);
 
@@ -718,8 +719,8 @@ static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
         writev(STDOUT_FILENO, write_vector, write_count);
     }
 
-    scrollable->offset_previous = scrollable->offset;
-    scrollable->selection_previous = scrollable->selection;
+    //scrollable->offset_previous = scrollable->offset;
+    //scrollable->selection_previous = scrollable->selection;
     scrollable->index_max_previous = index_max;
     //todo
 }
