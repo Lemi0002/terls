@@ -453,13 +453,15 @@ Error app_update_preview(Record *record_main, size_t selection, Record *record_p
 }
 
 int main(int argc, char** argv) {
-    String directory;
+    String_Builder directory = {0};
+    string_builder_reserve(&directory, 64);
 
     if (argc == 1) {
-        directory = string_from_cstring("./");
+        string_builder_append_cstring(&directory, "./");
     } else {
-        directory = string_from_cstring(argv[1]);
+        string_builder_append_cstring(&directory, argv[1]);
     }
+    string_builder_append_character(&directory, 0);
 
     Error error;
     Record record_main = {.entries = {0}, .names = {0}, .map = {0}};
@@ -467,7 +469,7 @@ int main(int argc, char** argv) {
     Atlas record_main_atlas = {0};
     Atlas record_preview_atlas = {0};
 
-    error = record_read_directory(&record_main, directory);
+    error = record_read_directory(&record_main, string_from_cstring(directory.data));
     if (error != error_none) {
         return error;
     }
@@ -544,7 +546,7 @@ int main(int argc, char** argv) {
             }
 
             tui_element_scrollable_update(&scrollable_main, 0, true, true);
-            app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, directory);
+            app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, string_from_cstring(directory.data));
             tui_element_scrollable_update(&scrollable_preview, 0, true, true);
 
             tui_element_scrollable_draw(&scrollable_main);
@@ -559,7 +561,7 @@ int main(int argc, char** argv) {
                 case 'q': break;
                 case 'j':
                     tui_element_scrollable_update(&scrollable_main, 1, true, true);
-                    app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, directory);
+                    app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, string_from_cstring(directory.data));
                     scrollable_preview.atlas_changed = true;
                     tui_element_scrollable_update(&scrollable_preview, 0, true, true);
 
@@ -569,7 +571,7 @@ int main(int argc, char** argv) {
 
                 case 'k': 
                     tui_element_scrollable_update(&scrollable_main, 1, false, true);
-                    app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, directory);
+                    app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, string_from_cstring(directory.data));
                     scrollable_preview.atlas_changed = true;
                     tui_element_scrollable_update(&scrollable_preview, 0, true, true);
 
