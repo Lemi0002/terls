@@ -1,3 +1,4 @@
+#include <linux/limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -11,6 +12,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <signal.h>
+#include <limits.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -22,6 +24,7 @@
 
 typedef enum Error {
     error_none = 0,
+    error_realpath,
     error_opendir,
     error_malloc,
     error_readdir,
@@ -422,8 +425,23 @@ void record_convert_to_atlas(Record *record, Atlas* atlas) {
     }
 }
 
-Error app_update_preview(Record *record_main, size_t selection, Record *record_preview, Atlas *record_preview_atlas, String directory) {
-    const size_t index = record_main->map.data[selection];
+Error app_update_main(Record *record_main, Atlas *record_main_atlas, String_Builder *directory) {
+    record_reset(record_main);
+    atlas_reset(record_main_atlas);
+
+    Error error = record_read_directory(record_main, string_from_cstring(directory->data));
+    if (error != error_none) {
+        return error;
+    }
+
+    record_create_sorted_map(record_main, SORT_NAME);
+    record_convert_to_atlas(record_main, record_main_atlas);
+
+    return error_none;
+}
+
+Error app_update_preview(Record *record_main, Tui_Element_Scrollable *scrollable_main, Record *record_preview, Atlas *record_preview_atlas, String_Builder *directory) {
+    const size_t index = record_main->map.data[scrollable_main->selection];
     Entry *const entry = &record_main->entries.data[index];
     const String entry_name = atlas_get_string_at_index(&record_main->names, index);
 
@@ -433,7 +451,7 @@ Error app_update_preview(Record *record_main, size_t selection, Record *record_p
         record_reset(record_preview);
         atlas_reset(record_preview_atlas);
 
-        string_builder_append_string(&path, directory);
+        string_builder_append_string(&path, string_from_cstring(directory->data));
         if (path.data[path.count - 1] != '/') {
             string_builder_append_character(&path, '/');
         }
@@ -452,36 +470,83 @@ Error app_update_preview(Record *record_main, size_t selection, Record *record_p
     return error_none;
 }
 
+Error app_path_up(String_Builder *path) {
+    const char root[] = "/";
+
+    assert(path->size >= general_array_size(root));
+    assert(path->count >= general_array_size(root));
+    assert(path->data[0] == '/');
+    assert(path->data[path->count - 1] == 0);
+
+    if(memcmp(path->data, root, general_array_size(root)) == 0) {
+        return error_none;
+    }
+
+    assert(path->count >= general_array_size(root) + 1);
+    assert(path->data[path->count - 2] != '/');
+
+    ssize_t index;
+    for(index = path->count - 2; index >= 0; --index) {
+        if(path->data[index] == '/') {
+            break;
+        }
+    }
+
+    if (index == 0) {
+        path->data[index + 1] = 0;
+        path->count = index + 2;
+    } else {
+        path->data[index] = 0;
+        path->count = index + 1;
+    }
+
+    return error_none;
+}
+
+Error app_path_down(String_Builder *path, Record *record, Tui_Element_Scrollable *scrollable) {
+    const size_t index = record->map.data[scrollable->selection];
+    Entry *const entry = &record->entries.data[index];
+    const String entry_name = atlas_get_string_at_index(&record->names, index);
+    const char root[] = "/";
+
+    assert(path->count >= general_array_size(root));
+    assert(path->data[0] == '/');
+    assert(path->data[path->count - 1] == 0);
+
+    if (entry_convert_type_to_character(entry) == 'd') {
+        if (path->data[path->count - 2] != '/') {
+            path->data[path->count - 1] = '/';
+        } else {
+            path->count--;
+        }
+        string_builder_append_string(path, entry_name);
+        string_builder_append_character(path, 0);
+    }
+
+    return error_none;
+}
+
 int main(int argc, char** argv) {
     String_Builder directory = {0};
-    string_builder_reserve(&directory, 64);
+    string_builder_reserve(&directory, PATH_MAX);
+    const char *directory_input;
 
     if (argc == 1) {
-        string_builder_append_cstring(&directory, "./");
+        directory_input = ".";
     } else {
-        string_builder_append_cstring(&directory, argv[1]);
+        directory_input = argv[1];
     }
-    string_builder_append_character(&directory, 0);
+
+    if (realpath(directory_input, directory.data) == NULL) {
+        return error_realpath;
+    }
+    directory.count = strlen(directory.data) + 1;
 
     Error error;
-    Record record_main = {.entries = {0}, .names = {0}, .map = {0}};
-    Record record_preview = {.entries = {0}, .names = {0}, .map = {0}};
+    Record record_main = {0};
+    Record record_preview = {0};
     Atlas record_main_atlas = {0};
     Atlas record_preview_atlas = {0};
-
-    error = record_read_directory(&record_main, string_from_cstring(directory.data));
-    if (error != error_none) {
-        return error;
-    }
-
-    String_Builder directory_path = {0};
-    dynamic_array_reserve(&directory_path, 1024);
-    if(getcwd(directory_path.data, directory_path.size) == NULL) {
-        return error_getcwd;
-    }
-
-    record_create_sorted_map(&record_main, SORT_NAME);
-    record_convert_to_atlas(&record_main, &record_main_atlas);
 
     struct termios settings_saved;
     error = terminal_apply_settings(&settings_saved);
@@ -504,6 +569,9 @@ int main(int argc, char** argv) {
         )
     };
     Tui_Window* windows_scratchpad[general_array_size(windows)];
+
+    Tui_Element_Text text_path = {0};
+    text_path.window = &windows[1];
 
     Tui_Element_Scrollable scrollable_main = {0};
     scrollable_main.window = &windows[3];
@@ -535,9 +603,9 @@ int main(int argc, char** argv) {
             }
 
             for(size_t i = 0; i < general_array_size(windows); i++) {
-                if(windows[i].id == 1) {
-                    printf(ASCII_CURSOR_MOVE_TO_POSITION "%s", windows[i].bounding_box.y, windows[i].bounding_box.x, directory_path.data);
-                } else if (windows[i].id == 4) {
+                // if(windows[i].id == 1) {
+                    // printf(ASCII_CURSOR_MOVE_TO_POSITION "%s", windows[i].bounding_box.y, windows[i].bounding_box.x, directory.data);
+                if (windows[i].id == 4) {
                     printf(ASCII_CURSOR_MOVE_TO_POSITION, windows[i].bounding_box.y, windows[i].bounding_box.x);
                     for(uint32_t dy = 0; dy < windows[i].bounding_box.height; dy++) {
                         printf("|" ASCII_CURSOR_MOVE_DOWN ASCII_CURSOR_MOVE_LEFT, 1, 1);
@@ -545,12 +613,14 @@ int main(int argc, char** argv) {
                 }
             }
 
+            app_update_main(&record_main, &record_main_atlas, &directory);
             tui_element_scrollable_update(&scrollable_main, 0, true, true);
-            app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, string_from_cstring(directory.data));
+            app_update_preview(&record_main, &scrollable_main, &record_preview, &record_preview_atlas, &directory);
             tui_element_scrollable_update(&scrollable_preview, 0, true, true);
 
             tui_element_scrollable_draw(&scrollable_main);
             tui_element_scrollable_draw(&scrollable_preview);
+            tui_element_text_draw(&text_path, string_from_cstring(directory.data));
         }
 
         ssize_t count = read(STDIN_FILENO, &input, 1);
@@ -561,26 +631,46 @@ int main(int argc, char** argv) {
                 case 'q': break;
                 case 'j':
                     tui_element_scrollable_update(&scrollable_main, 1, true, true);
-                    app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, string_from_cstring(directory.data));
-                    scrollable_preview.atlas_changed = true;
+                    app_update_preview(&record_main, &scrollable_main, &record_preview, &record_preview_atlas, &directory);
                     tui_element_scrollable_update(&scrollable_preview, 0, true, true);
 
                     tui_element_scrollable_draw(&scrollable_main);
                     tui_element_scrollable_draw(&scrollable_preview);
                     break;
 
-                case 'k': 
+                case 'k':
                     tui_element_scrollable_update(&scrollable_main, 1, false, true);
-                    app_update_preview(&record_main, scrollable_main.selection, &record_preview, &record_preview_atlas, string_from_cstring(directory.data));
-                    scrollable_preview.atlas_changed = true;
+                    app_update_preview(&record_main, &scrollable_main, &record_preview, &record_preview_atlas, &directory);
                     tui_element_scrollable_update(&scrollable_preview, 0, true, true);
 
                     tui_element_scrollable_draw(&scrollable_main);
                     tui_element_scrollable_draw(&scrollable_preview);
                     break;
 
-                case 'h': printf(ASCII_CURSOR_MOVE_LEFT, 1); break;
-                case 'l': printf(ASCII_CURSOR_MOVE_RIGHT, 1); break;
+                case 'h':
+                    app_path_up(&directory);
+                    app_update_main(&record_main, &record_main_atlas, &directory);
+                    tui_element_scrollable_update(&scrollable_main, 0, true, true);
+                    app_update_preview(&record_main, &scrollable_main, &record_preview, &record_preview_atlas, &directory);
+                    tui_element_scrollable_update(&scrollable_preview, 0, true, true);
+
+                    tui_element_scrollable_draw(&scrollable_main);
+                    tui_element_scrollable_draw(&scrollable_preview);
+                    tui_element_text_draw(&text_path, string_from_cstring(directory.data));
+                    break;
+
+                case 'l':
+                    app_path_down(&directory, &record_main, &scrollable_main);
+                    app_update_main(&record_main, &record_main_atlas, &directory);
+                    tui_element_scrollable_update(&scrollable_main, 0, true, true);
+                    app_update_preview(&record_main, &scrollable_main, &record_preview, &record_preview_atlas, &directory);
+                    tui_element_scrollable_update(&scrollable_preview, 0, true, true);
+
+                    tui_element_scrollable_draw(&scrollable_main);
+                    tui_element_scrollable_draw(&scrollable_preview);
+                    tui_element_text_draw(&text_path, string_from_cstring(directory.data));
+                    break;
+
                 default: break;
             }
         }
@@ -594,8 +684,10 @@ int main(int argc, char** argv) {
     }
 
     record_free(&record_main);
+    record_free(&record_preview);
     atlas_free(&record_main_atlas);
-    string_builder_free(&directory_path);
+    atlas_free(&record_preview_atlas);
+    string_builder_free(&directory);
 
     return error_none;
 }

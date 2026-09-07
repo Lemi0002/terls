@@ -582,7 +582,7 @@ typedef struct Tui_Element_Scrollable {
     Atlas* atlas;
     String selection_format;
 
-    bool atlas_changed;
+    //bool atlas_changed;
     size_t offset_previous;
     size_t selection_previous;
     size_t index_max_previous;
@@ -669,6 +669,7 @@ static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
     for(size_t index = scrollable->offset; index < index_max; index++) {
         const String string = atlas_get_string_at_index(scrollable->atlas, index);
 
+        // todo: fix too long content lines
         if (scrollable->atlas->indecies.data[index].length_visible > scrollable->window->bounding_box.width) {
             continue;
         }
@@ -723,6 +724,35 @@ static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
     //scrollable->selection_previous = scrollable->selection;
     scrollable->index_max_previous = index_max;
     //todo
+}
+
+typedef struct Tui_Element_Text {
+    Tui_Window* window;
+
+    size_t string_length_previous;
+} Tui_Element_Text;
+
+static void tui_element_text_draw(Tui_Element_Text *text, String string) {
+    const char fill[] = "++++++++++++++++++++++++++++++++++++++++";
+    const size_t fill_length = general_array_size(fill) - 1;
+    const size_t string_length = general_min(text->window->bounding_box.width, string.length);
+    const size_t fill_width = text->window->bounding_box.width - string_length;
+
+    struct iovec write_vector[20];
+    size_t write_count = 0;
+
+    printf(ASCII_CURSOR_MOVE_TO_POSITION, text->window->bounding_box.y, text->window->bounding_box.x);
+
+    write_vector[write_count].iov_base = (void*)string.cstring;
+    write_vector[write_count].iov_len = string_length;
+    write_count++;
+
+    // todo: rename function
+    __tui_element_scrollable_comulative_write(write_vector, general_array_size(write_vector) - 1, &write_count, fill, fill_length, fill_width);
+    writev(STDOUT_FILENO, write_vector, write_count);
+
+    // todo: update only as much as required
+    text->string_length_previous = string.length;
 }
 
 #endif
