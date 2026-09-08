@@ -46,19 +46,71 @@ typedef struct String {
     size_t length;
 } String;
 
-static String string_from_cstring(char* cstring) {
-    return (String){
-        .cstring = cstring,
-        .length = strlen(cstring)
-    };
-}
-
 typedef struct String_Builder {
     char* data;
     size_t size;
     size_t count;
     size_t control_character_count;
 } String_Builder;
+
+static size_t buffer_insert_character(char* const buffer, const size_t buffer_length, const size_t offset, const char character);
+static size_t buffer_insert_string(char* const buffer, const size_t buffer_length, const size_t offset, String string);
+static size_t buffer_insert_cstring(char* const buffer, const size_t buffer_length, const size_t offset, char* cstring);
+static size_t buffer_insert_integer(char* const buffer, const size_t buffer_length, const size_t offset, size_t data, const uint8_t width, const char fill_character);
+static String string_from_cstring(char* cstring);
+static void string_builder_reserve(String_Builder* string_builder, size_t count);
+static void string_builder_reset(String_Builder* string_builder);
+static size_t string_builder_append_character(String_Builder* string_builder, char character);
+static size_t string_builder_append_string(String_Builder* string_builder, String string);
+static size_t string_builder_append_cstring(String_Builder* string_builder, char* cstring);
+static size_t string_builder_append_integer(String_Builder* string_builder, size_t data, const uint8_t width, const char fill_character);
+static void string_builder_increment_control_character_count(String_Builder* string_builder, size_t control_character_count);
+static void string_builder_free(String_Builder* string_builder);
+
+static size_t buffer_insert_character(char* const buffer, const size_t buffer_length, const size_t offset, const char character) {
+    assert(buffer_length > offset);
+    buffer[offset] = character;
+    return 1;
+}
+
+static size_t buffer_insert_string(char* const buffer, const size_t buffer_length, const size_t offset, String string) {
+    assert(buffer_length > offset);
+    const size_t length_limit = general_min(buffer_length - offset, string.length);
+    memcpy(buffer + offset, string.cstring, length_limit);
+    return length_limit;
+}
+
+static size_t buffer_insert_cstring(char* const buffer, const size_t buffer_length, const size_t offset, char* cstring) {
+    return buffer_insert_string(buffer, buffer_length, offset, string_from_cstring(cstring));
+}
+
+static size_t buffer_insert_integer(char* const buffer, const size_t buffer_length, const size_t offset, size_t data, const uint8_t width, const char fill_character) {
+    assert(buffer_length > offset);
+    const size_t width_limit = general_min(buffer_length - offset, width);
+
+    bool fill = false;
+    for(uint8_t i = width_limit; i > 0; --i) {
+        if(fill) {
+            buffer[offset + i - 1] = fill_character;
+        } else {
+            buffer[offset + i - 1] = '0' + (data % 10);
+        }
+
+        data = data / 10;
+
+        if(data == 0) {
+            fill = true;
+        }
+    }
+    return width_limit;
+}
+
+static String string_from_cstring(char* cstring) {
+    return (String){
+        .cstring = cstring,
+        .length = strlen(cstring)
+    };
+}
 
 static void string_builder_reserve(String_Builder* string_builder, size_t count) {
     dynamic_array_reserve(string_builder, count);
@@ -69,43 +121,28 @@ static void string_builder_reset(String_Builder* string_builder) {
     string_builder->control_character_count = 0;
 }
 
-static void string_builder_append_character(String_Builder* string_builder, char character) {
+static size_t string_builder_append_character(String_Builder* string_builder, char character) {
     dynamic_array_append(string_builder, character);
+    return 1;
 }
 
-static void string_builder_append_cstring(String_Builder* string_builder, char* cstring) {
-    size_t length = strlen(cstring);
-    dynamic_array_reserve(string_builder, length);
-
-    memcpy(string_builder->data + string_builder->count, cstring, length);
-    string_builder->count += length;
-}
-
-static void string_builder_append_string(String_Builder* string_builder, String string) {
+static size_t string_builder_append_string(String_Builder* string_builder, String string) {
     dynamic_array_reserve(string_builder, string.length);
-
-    memcpy(string_builder->data + string_builder->count, string.cstring, string.length);
-    string_builder->count += string.length;
+    const size_t count = buffer_insert_string(string_builder->data, string_builder->size, string_builder->count, string);
+    string_builder->count += count;
+    return count;
 }
 
-static void string_builder_append_integer(String_Builder* string_builder, size_t data, const uint8_t width, const char fill_character) {
-    bool fill = false;
+static size_t string_builder_append_cstring(String_Builder* string_builder, char* cstring) {
+    const size_t count = string_builder_append_string(string_builder, string_from_cstring(cstring));
+    return count;
+}
+
+static size_t string_builder_append_integer(String_Builder* string_builder, size_t data, const uint8_t width, const char fill_character) {
     dynamic_array_reserve(string_builder, width);
-
-    for(uint8_t i = width; i > 0; --i) {
-        if(fill) {
-            string_builder->data[string_builder->count + i - 1] = fill_character;
-        } else {
-            string_builder->data[string_builder->count + i - 1] = '0' + (data % 10);
-        }
-
-        data = data / 10;
-
-        if(data == 0) {
-            fill = true;
-        }
-    }
-    string_builder->count += width;
+    const size_t count = buffer_insert_integer(string_builder->data, string_builder->size, string_builder->count, data, width, fill_character);
+    string_builder->count += count;
+    return count;
 }
 
 static void string_builder_increment_control_character_count(String_Builder* string_builder, size_t control_character_count) {
@@ -178,35 +215,6 @@ static void atlas_string_builder_end(Atlas* atlas) {
     const size_t length_visible = length - general_min(length, control_character_count);
     dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder_tempo.count, .length = length, .length_visible = length_visible}));
     string_builder_append_character(&atlas->string_builder, 0);
-}
-
-static inline size_t buffer_append_cstring(char* const buffer, const size_t offset, char* cstring) {
-    const size_t length = strlen(cstring);
-    memcpy(buffer + offset, cstring, length);
-    return length;
-}
-
-static inline size_t buffer_append_character(char* const buffer, const size_t offset, const char character) {
-    buffer[offset] = character;
-    return 1;
-}
-
-static size_t buffer_append_integer(char* const buffer, const size_t offset, size_t data, const uint8_t width, const char fill_character) {
-    bool fill = false;
-    for(uint8_t i = width; i > 0; --i) {
-        if(fill) {
-            buffer[offset + i - 1] = fill_character;
-        } else {
-            buffer[offset + i - 1] = '0' + (data % 10);
-        }
-
-        data = data / 10;
-
-        if(data == 0) {
-            fill = true;
-        }
-    }
-    return width;
 }
 
 #define ASCII_ESCAPE "\x1B"
