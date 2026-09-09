@@ -169,18 +169,15 @@ typedef struct Atlas {
     String_Builder string_builder_tempo;
 } Atlas;
 
-static void atlas_append_cstring(Atlas* atlas, char* cstring) {
-    const size_t length = strlen(cstring);
-    dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder.count, .length = length, .length_visible = length}));
-    string_builder_append_string(&atlas->string_builder, (String){.cstring = cstring, .length = length});
-    string_builder_append_character(&atlas->string_builder, 0);
-}
-
 static void atlas_append_string(Atlas* atlas, String string) {
     const size_t length = string.length;
     dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder.count, .length = length, .length_visible = length}));
     string_builder_append_string(&atlas->string_builder, (String){.cstring = string.cstring, .length = length});
     string_builder_append_character(&atlas->string_builder, 0);
+}
+
+static void atlas_append_cstring(Atlas* atlas, char* cstring) {
+    atlas_append_string(atlas, string_from_cstring(cstring));
 }
 
 static char* atlas_get_cstring_at_index(Atlas* atlas, size_t index) {
