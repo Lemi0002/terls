@@ -50,7 +50,6 @@ typedef struct String_Builder {
     char* data;
     size_t size;
     size_t count;
-    size_t control_character_count;
 } String_Builder;
 
 static size_t buffer_insert_character(char* const buffer, const size_t buffer_length, const size_t offset, const char character);
@@ -64,7 +63,6 @@ static size_t string_builder_append_character(String_Builder* string_builder, ch
 static size_t string_builder_append_string(String_Builder* string_builder, String string);
 static size_t string_builder_append_cstring(String_Builder* string_builder, char* cstring);
 static size_t string_builder_append_integer(String_Builder* string_builder, size_t data, const uint8_t width, const char fill_character);
-static void string_builder_increment_control_character_count(String_Builder* string_builder, size_t control_character_count);
 static void string_builder_free(String_Builder* string_builder);
 
 static size_t buffer_insert_character(char* const buffer, const size_t buffer_length, const size_t offset, const char character) {
@@ -118,7 +116,6 @@ static void string_builder_reserve(String_Builder* string_builder, size_t count)
 
 static void string_builder_reset(String_Builder* string_builder) {
     dynamic_array_reset(string_builder);
-    string_builder->control_character_count = 0;
 }
 
 static size_t string_builder_append_character(String_Builder* string_builder, char character) {
@@ -145,10 +142,6 @@ static size_t string_builder_append_integer(String_Builder* string_builder, size
     return count;
 }
 
-static void string_builder_increment_control_character_count(String_Builder* string_builder, size_t control_character_count) {
-    string_builder->control_character_count += control_character_count;
-}
-
 static void string_builder_free(String_Builder* string_builder) {
     free(string_builder->data);
 }
@@ -156,7 +149,6 @@ static void string_builder_free(String_Builder* string_builder) {
 typedef struct Index {
     size_t head;
     size_t length;
-    size_t length_visible;
 } Index;
 
 typedef struct Atlas {
@@ -171,7 +163,7 @@ typedef struct Atlas {
 
 static void atlas_append_string(Atlas* atlas, String string) {
     const size_t length = string.length;
-    dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder.count, .length = length, .length_visible = length}));
+    dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder.count, .length = length}));
     string_builder_append_string(&atlas->string_builder, (String){.cstring = string.cstring, .length = length});
     string_builder_append_character(&atlas->string_builder, 0);
 }
@@ -208,9 +200,7 @@ static String_Builder* atlas_string_builder_begin(Atlas* atlas) {
 
 static void atlas_string_builder_end(Atlas* atlas) {
     const size_t length = atlas->string_builder.count - atlas->string_builder_tempo.count;
-    const size_t control_character_count = atlas->string_builder.control_character_count - atlas->string_builder_tempo.control_character_count;
-    const size_t length_visible = length - general_min(length, control_character_count);
-    dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder_tempo.count, .length = length, .length_visible = length_visible}));
+    dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder_tempo.count, .length = length}));
     string_builder_append_character(&atlas->string_builder, 0);
 }
 
@@ -674,15 +664,10 @@ static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
     for(size_t index = scrollable->offset; index < index_max; index++) {
         const String string = atlas_get_string_at_index(scrollable->atlas, index);
 
-        // todo: fix too long content lines
-        if (scrollable->atlas->indecies.data[index].length_visible > scrollable->window->bounding_box.width) {
-            continue;
-        }
-
         assert(general_array_size(write_vector) >= 4);
         assert(fill_length >= 1);
-        const size_t length_max = scrollable->atlas->indecies.data[index].length;
-        const size_t fill_width = scrollable->window->bounding_box.width - scrollable->atlas->indecies.data[index].length_visible;
+        const size_t length_max = general_min(scrollable->window->bounding_box.width, scrollable->atlas->indecies.data[index].length);
+        const size_t fill_width = scrollable->window->bounding_box.width - length_max;
         size_t write_count = 0;
 
         if (index == scrollable->selection) {
