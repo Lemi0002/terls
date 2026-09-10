@@ -574,13 +574,13 @@ int main(int argc, char** argv) {
 
     Tui_Window windows[] = {
         tui_window_make_root(0, TUI_LAYOUT_VERTICAL,
-            tui_window_make_element(0, 1, tui_size_make_fixed(1)),
+            tui_window_make_leaf(0, 1, tui_size_make_fixed(1)),
             tui_window_make_layout(0, 2, tui_size_make_fill(), TUI_LAYOUT_HORIZONTAL,
-                tui_window_make_element(2, 3, tui_size_make_fixed(6)),
-                tui_window_make_element(2, 4, tui_size_make_ratio(0.5)),
-                tui_window_make_element(2, 5, tui_size_make_fixed(1)),
-                tui_window_make_element(2, 6, tui_size_make_fill())),
-            tui_window_make_element(0, 7, tui_size_make_fixed(1))
+                tui_window_make_leaf(2, 3, tui_size_make_fixed(6)),
+                tui_window_make_leaf(2, 4, tui_size_make_ratio(0.5)),
+                tui_window_make_leaf(2, 5, tui_size_make_fixed(1)),
+                tui_window_make_leaf(2, 6, tui_size_make_fill())),
+            tui_window_make_leaf(0, 7, tui_size_make_fixed(1))
         )
     };
     Tui_Window* windows_scratchpad[general_array_size(windows)];
@@ -617,11 +617,7 @@ int main(int argc, char** argv) {
             );
 
             Tui_Bounding_Box bounding_box = {.x = 1, .y = 1, .width = terminal_size.ws_col, .height = terminal_size.ws_row};
-            tui_error = tui_update(windows, windows_scratchpad, general_array_size(windows), &bounding_box);
-            if(tui_error != TUI_ERROR_NONE) {
-                // todo: application crashes if window width is too small
-                return error_tui_update;
-            }
+            tui_update(windows, windows_scratchpad, general_array_size(windows), &bounding_box);
 
             for(size_t i = 0; i < general_array_size(windows); i++) {
                 // if(windows[i].id == 1) {

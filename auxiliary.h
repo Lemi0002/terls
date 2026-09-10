@@ -392,7 +392,6 @@ typedef enum Tui_Error {
     TUI_ERROR_MULTIPLE_ROOT_WINDOWS,
     TUI_ERROR_ROOT_WINDOW_INDEX,
     TUI_ERROR_MULTIPLE_FILL_SIZE_WINDOWS,
-    TUI_ERROR_BOUNDING_BOX_TOO_SMALL,
 } Tui_Error;
 
 #define tui_window_number_of_arguments(...)  (sizeof((Tui_Window[]){__VA_ARGS__})/sizeof(Tui_Window))
@@ -419,7 +418,7 @@ typedef enum Tui_Error {
         .child_count = tui_window_number_of_arguments(__VA_ARGS__), \
     }, __VA_ARGS__
 
-#define tui_window_make_element(id_parent, id_child, size_child) \
+#define tui_window_make_leaf(id_parent, id_child, size_child) \
     (Tui_Window){ \
         .id = (id_child), \
         .parent = (id_parent), \
@@ -430,7 +429,7 @@ typedef enum Tui_Error {
         .child_count = 0, \
     }
 
-static void tui_child_windows(Tui_Window* windows, size_t count, size_t parent_index, Tui_Window** child_windows, size_t* child_count) {
+static void tui_extract_child_windows(Tui_Window* windows, size_t count, size_t parent_index, Tui_Window** child_windows, size_t* child_count) {
     *child_count = 0;
 
     for(size_t i = parent_index + 1; i < count; i++) {
@@ -441,6 +440,33 @@ static void tui_child_windows(Tui_Window* windows, size_t count, size_t parent_i
         child_windows[*child_count] = &windows[i];
         (*child_count)++;
     }
+}
+
+static Tui_Layout tui_axis_primary(Tui_Layout layout) {
+    switch(layout) {
+        case TUI_LAYOUT_VERTICAL:
+            return TUI_LAYOUT_VERTICAL;
+        case TUI_LAYOUT_HORIZONTAL:
+            return TUI_LAYOUT_HORIZONTAL;
+    }
+}
+
+static Tui_Layout tui_axis_secondary(Tui_Layout layout) {
+    switch(layout) {
+        case TUI_LAYOUT_VERTICAL:
+            return TUI_LAYOUT_HORIZONTAL;
+        case TUI_LAYOUT_HORIZONTAL:
+            return TUI_LAYOUT_VERTICAL;
+    }
+}
+
+static size_t tui_apply_child_window_length(Tui_Window* window, Tui_Layout layout, size_t length, size_t parent_length, size_t child_length) {
+    assert(length <= parent_length);
+    if(length + child_length > parent_length) {
+        child_length = parent_length - length;
+    }
+    tui_bounding_box_length(&window->bounding_box, layout) = child_length;
+    return child_length;
 }
 
 static Tui_Error tui_check(Tui_Window* windows, Tui_Window** scratchpad, size_t count) {
@@ -476,7 +502,7 @@ static Tui_Error tui_check(Tui_Window* windows, Tui_Window** scratchpad, size_t 
             case TUI_WINDOW_KIND_LAYOUT: {
                 size_t child_count;
                 Tui_Window** child_windows = scratchpad;
-                tui_child_windows(windows, count, i, child_windows, &child_count);
+                tui_extract_child_windows(windows, count, i, child_windows, &child_count);
 
                 size_t fill_count = 0;
                 for(size_t j = 0; j < child_count; j++) {
@@ -499,28 +525,19 @@ static Tui_Error tui_check(Tui_Window* windows, Tui_Window** scratchpad, size_t 
     return TUI_ERROR_NONE;
 }
 
-static Tui_Error tui_update(Tui_Window* windows, Tui_Window** scratchpad, size_t count, Tui_Bounding_Box* bounding_box_root) {
+static void tui_update(Tui_Window* windows, Tui_Window** scratchpad, size_t count, Tui_Bounding_Box* bounding_box_root) {
     for(size_t i = 0; i < count; i++) {
         switch(windows[i].kind) {
             case TUI_WINDOW_KIND_ROOT:
                 windows[i].bounding_box = *bounding_box_root;
+
             case TUI_WINDOW_KIND_LAYOUT: {
                 size_t child_count;
                 Tui_Window** child_windows = scratchpad;
-                tui_child_windows(windows, count, i, child_windows, &child_count);
+                tui_extract_child_windows(windows, count, i, child_windows, &child_count);
 
-                Tui_Layout axis_primary;
-                Tui_Layout axis_secondary;
-                switch(windows[i].layout) {
-                    case TUI_LAYOUT_VERTICAL:
-                        axis_primary = TUI_LAYOUT_VERTICAL;
-                        axis_secondary = TUI_LAYOUT_HORIZONTAL;
-                        break;
-                    case TUI_LAYOUT_HORIZONTAL:
-                        axis_primary = TUI_LAYOUT_HORIZONTAL;
-                        axis_secondary = TUI_LAYOUT_VERTICAL;
-                        break;
-                }
+                Tui_Layout axis_primary = tui_axis_primary(windows[i].layout);
+                Tui_Layout axis_secondary = tui_axis_secondary(windows[i].layout);
 
                 Tui_Window* child_window_fill = NULL;
                 uint32_t length = 0;
@@ -529,13 +546,11 @@ static Tui_Error tui_update(Tui_Window* windows, Tui_Window** scratchpad, size_t
                     switch(child_windows[j]->size.kind) {
                         case TUI_SIZE_KIND_FIXED: {
                             uint32_t const child_length = child_windows[j]->size.as.fixed;
-                            length += child_length;
-                            tui_bounding_box_length(&child_windows[j]->bounding_box, axis_primary) = child_length;
+                            length += tui_apply_child_window_length(child_windows[j], axis_primary, length, parent_length, child_length);
                         } break;
                         case TUI_SIZE_KIND_RATIO: {
                             uint32_t const child_length = (uint32_t)(child_windows[j]->size.as.ratio * parent_length);
-                            length += child_length;
-                            tui_bounding_box_length(&child_windows[j]->bounding_box, axis_primary) = child_length;
+                            length += tui_apply_child_window_length(child_windows[j], axis_primary, length, parent_length, child_length);
                         } break;
                         case TUI_SIZE_KIND_FILL: {
                             child_window_fill = child_windows[j];
@@ -545,12 +560,10 @@ static Tui_Error tui_update(Tui_Window* windows, Tui_Window** scratchpad, size_t
                     tui_bounding_box_length(&child_windows[j]->bounding_box, axis_secondary) = tui_bounding_box_length(&windows[i].bounding_box, axis_secondary);
                 }
 
-                if(length > parent_length) {
-                    return TUI_ERROR_BOUNDING_BOX_TOO_SMALL;
-                }
-
+                assert(length <= parent_length);
                 if(child_window_fill != NULL) {
-                    tui_bounding_box_length(&child_window_fill->bounding_box, axis_primary) = parent_length - length;
+                    uint32_t const child_length = parent_length - length;
+                    tui_apply_child_window_length(child_window_fill, axis_primary, length, parent_length, parent_length - length);
                 }
 
                 uint32_t position = tui_bounding_box_position(&windows[i].bounding_box, axis_primary);
@@ -562,12 +575,11 @@ static Tui_Error tui_update(Tui_Window* windows, Tui_Window** scratchpad, size_t
 
             case TUI_WINDOW_KIND_LEAF:
                 break;
+
             default:
                 break;
         }
     }
-
-    return TUI_ERROR_NONE;
 }
 
 typedef struct Tui_Element_Scrollable {
