@@ -774,4 +774,31 @@ static void tui_element_text_draw(Tui_Element_Text *text, String string) {
     string_builder_free(&settings);
 }
 
+typedef struct Tui_Element_Line {
+    Tui_Window* window;
+} Tui_Element_Line;
+
+static void tui_element_line_vertical_draw(Tui_Element_Line* line, uint8_t character) {
+    const char postfix[] = ASCII_ESCAPE"[1B" ASCII_ESCAPE"[1D";
+    const size_t postfix_length = general_array_size(postfix) - 1;
+
+    String_Builder settings = {0};
+    Data_Vector data_vector = {0};
+
+    if(line->window->bounding_box.width == 0) {
+        return;
+    }
+
+    tui_append_position(&settings, line->window->bounding_box.x, line->window->bounding_box.y);
+    data_vector_push_and_write_optionally(&data_vector, settings.data, settings.count);
+
+    for(uint32_t dy = 0; dy < line->window->bounding_box.height; dy++) {
+        data_vector_push_and_write_optionally(&data_vector, &character, 1);
+        data_vector_push_and_write_optionally(&data_vector, (void*)postfix, postfix_length);
+    }
+
+    data_vector_write(&data_vector);
+    string_builder_free(&settings);
+}
+
 #endif

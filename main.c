@@ -589,6 +589,9 @@ int main(int argc, char** argv) {
     scrollable_primary.atlas = &primary_atlas;
     scrollable_primary.selection_format = (String){.cstring = ASCII_MODE_ENABLE_UNDERLINE, .length = ASCII_MODE_ENABLE_UNDERLINE_LENGTH};
 
+    Tui_Element_Line line = {0};
+    line.window = &windows[5];
+
     Tui_Element_Scrollable scrollable_secondary = {0};
     scrollable_secondary.window = &windows[6];
     scrollable_secondary.atlas = &secondary_atlas;
@@ -603,23 +606,10 @@ int main(int argc, char** argv) {
     do {
         if (terminal_size_updated) {
             terminal_size_updated = 0;
-            printf(
-                ASCII_ERASE_SCREEN
-            );
+            write(STDOUT_FILENO, ASCII_ERASE_SCREEN, ASCII_ERASE_SCREEN_LENGTH);
 
             Tui_Bounding_Box bounding_box = {.x = 1, .y = 1, .width = terminal_size.ws_col, .height = terminal_size.ws_row};
             tui_update(windows, windows_scratchpad, general_array_size(windows), &bounding_box);
-
-            for(size_t i = 0; i < general_array_size(windows); i++) {
-                // if(windows[i].id == 1) {
-                    // printf(ASCII_CURSOR_MOVE_TO_POSITION "%s", windows[i].bounding_box.y, windows[i].bounding_box.x, directory.data);
-                if (windows[i].id == 5) {
-                    printf(ASCII_CURSOR_MOVE_TO_POSITION, windows[i].bounding_box.y, windows[i].bounding_box.x);
-                    for(uint32_t dy = 0; dy < windows[i].bounding_box.height; dy++) {
-                        printf("|" ASCII_CURSOR_MOVE_DOWN ASCII_CURSOR_MOVE_LEFT, 1, 1);
-                    }
-                }
-            }
 
             app_update_primary(&primary_record, &primary_atlas, &directory);
             app_update_primary_line_number(&primary_record, &primary_line_number);
@@ -631,6 +621,7 @@ int main(int argc, char** argv) {
             tui_element_scrollable_draw(&scrollable_primary);
             tui_element_scrollable_draw(&scrollable_secondary);
             tui_element_text_draw(&text_path, string_from_cstring(directory.data));
+            tui_element_line_vertical_draw(&line, '#');
         }
 
         ssize_t count = read(STDIN_FILENO, &input, 1);
