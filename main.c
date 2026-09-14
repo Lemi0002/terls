@@ -266,15 +266,6 @@ void record_create_sorted_map(Record *record, Sort sort) {
         *result = max; \
     } while(0)
 
-int width_integer(size_t value) {
-    int width = 0;
-    do {
-        value /= 10;
-        width++;
-    } while(value);
-    return width;
-}
-
 size_t width_string(const char* string) {
     return strlen(string);
 }
@@ -386,18 +377,18 @@ Error record_read_directory(Record *record, String directory) {
 }
 
 void record_convert_to_atlas(Record *record, Atlas* atlas) {
-    int index_width = width_integer(record->entries.count);
-    int inode_width;
-    int link_count_width;
-    int size_width;
-    int uid_width;
-    int gid_width;
+    uint8_t index_width = general_integer_width(record->entries.count);
+    uint8_t inode_width;
+    uint8_t link_count_width;
+    uint8_t size_width;
+    uint8_t uid_width;
+    uint8_t gid_width;
 
-    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].inode), &inode_width);
-    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].link_count), &link_count_width);
-    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].size), &size_width);
-    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].uid), &uid_width);
-    integer_max_lambda(record->entries.count, width_integer(record->entries.data[i].gid), &gid_width);
+    integer_max_lambda(record->entries.count, general_integer_width(record->entries.data[i].inode), &inode_width);
+    integer_max_lambda(record->entries.count, general_integer_width(record->entries.data[i].link_count), &link_count_width);
+    integer_max_lambda(record->entries.count, general_integer_width(record->entries.data[i].size), &size_width);
+    integer_max_lambda(record->entries.count, general_integer_width(record->entries.data[i].uid), &uid_width);
+    integer_max_lambda(record->entries.count, general_integer_width(record->entries.data[i].gid), &gid_width);
 
     for(size_t i = 0; i < record->entries.count; i++) {
         String_Builder* string_builder = atlas_string_builder_begin(atlas);

@@ -16,6 +16,15 @@
 #define general_absolute(a) ((a) < 0 ? -(a) : (a))
 #define general_sign(a) ((a) < 0 ? -1 : 1)
 
+static uint8_t general_integer_width(size_t value) {
+    uint8_t width = 0;
+    do {
+        value /= 10;
+        width++;
+    } while(value);
+    return width;
+}
+
 #define dynamic_array_fields(data_type) \
     (data_type)* data; \
     size_t size; \
@@ -210,6 +219,9 @@ static void atlas_string_builder_end(Atlas* atlas) {
 #define ASCII_CURSOR_MOVE_TO_HOME_LENGTH 3
 
 #define ASCII_CURSOR_MOVE_TO_POSITION ASCII_ESCAPE"[%d;%dH"
+#define ASCII_CURSOR_MOVE_TO_POSITION_0 ASCII_ESCAPE"["
+#define ASCII_CURSOR_MOVE_TO_POSITION_1 ';'
+#define ASCII_CURSOR_MOVE_TO_POSITION_2 'H'
 #define ASCII_CURSOR_MOVE_UP ASCII_ESCAPE"[%dA"
 #define ASCII_CURSOR_MOVE_DOWN ASCII_ESCAPE"[%dB"
 #define ASCII_CURSOR_MOVE_RIGHT ASCII_ESCAPE"[%dC"
@@ -327,6 +339,36 @@ static void atlas_string_builder_end(Atlas* atlas) {
 #define ASCII_PRIVATE_ENABLE_ALTERNATIVE_BUFFER_LENGTH 8
 #define ASCII_PRIVATE_DISABLE_ALTERNATIVE_BUFFER ASCII_ESCAPE"[?1049l"
 #define ASCII_PRIVATE_DISABLE_ALTERNATIVE_BUFFER_LENGTH 8
+
+typedef struct Data_Vector {
+    struct iovec data[40];
+    size_t count;
+} Data_Vector;
+
+static bool data_vector_write(Data_Vector *data_vector) {
+    if(data_vector->count == 0) {
+        return false;
+    }
+
+    writev(STDOUT_FILENO, data_vector->data, data_vector->count);
+    data_vector->count = 0;
+    return true;
+}
+
+static bool data_vector_push_and_write_optionally(Data_Vector *data_vector, void* data, size_t data_length) {
+    assert(data_vector->count < general_array_size(data_vector->data));
+    data_vector->data[data_vector->count].iov_base = data;
+    data_vector->data[data_vector->count].iov_len = data_length;
+    data_vector->count++;
+
+    bool data_written = false;
+
+    if (data_vector->count == general_array_size(data_vector->data)) {
+        data_written = data_vector_write(data_vector);
+    }
+
+    return data_written;
+}
 
 typedef enum Tui_Size_Kind {
     TUI_SIZE_KIND_FIXED,
@@ -630,31 +672,27 @@ static void tui_element_scrollable_update(Tui_Element_Scrollable* scrollable, si
     }
 }
 
-static void __tui_element_scrollable_comulative_write(struct iovec *const write_vector, const size_t write_length, size_t *const write_count, const char *data, const size_t data_length, size_t fill_width) {
+static void tui_fill_push_and_write_optionally(Data_Vector *data_vector, const char *data, const size_t data_length, size_t fill_width) {
     while(fill_width > 0) {
-        while(*write_count < write_length) {
-            size_t width;
-            if (fill_width >= data_length) {
-                width = data_length;
-                fill_width -= data_length;
-            } else {
-                width = fill_width;
-                fill_width = 0;
-            }
-
-            write_vector[*write_count].iov_base = (void*)data;
-            write_vector[*write_count].iov_len = width;
-            (*write_count)++;
-
-            if (fill_width == 0) {
-                return;
-            }
+        size_t width;
+        if (fill_width >= data_length) {
+            width = data_length;
+            fill_width -= data_length;
+        } else {
+            width = fill_width;
+            fill_width = 0;
         }
 
-        assert(fill_width > 0);
-        writev(STDOUT_FILENO, write_vector, *write_count);
-        *write_count = 0;
+        data_vector_push_and_write_optionally(data_vector, (void*)data, width);
     }
+}
+
+static void tui_append_position(String_Builder *string_builder, size_t x, size_t y) {
+    string_builder_append_string(string_builder, string_from_cstring((char *)ASCII_CURSOR_MOVE_TO_POSITION_0));
+    string_builder_append_integer(string_builder, y, general_integer_width(y), '0');
+    string_builder_append_character(string_builder, ASCII_CURSOR_MOVE_TO_POSITION_1);
+    string_builder_append_integer(string_builder, x, general_integer_width(x), '0');
+    string_builder_append_character(string_builder, ASCII_CURSOR_MOVE_TO_POSITION_2);
 }
 
 static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
@@ -666,71 +704,51 @@ static void tui_element_scrollable_draw(Tui_Element_Scrollable* scrollable) {
     const size_t selection_postfix_length = general_array_size(selection_postifx) - 1;
     const char fill[] = "****************************************";
     const size_t fill_length = general_array_size(fill) - 1;
-
     const size_t index_max = general_min(scrollable->atlas->indecies.count, scrollable->offset + scrollable->window->bounding_box.height);
 
-    struct iovec write_vector[20];
+    String_Builder settings = {0};
+    Data_Vector data_vector = {0};
 
-    printf(ASCII_CURSOR_MOVE_TO_POSITION ASCII_CURSOR_SAVE_POSITION_DEC, scrollable->window->bounding_box.y, scrollable->window->bounding_box.x);
+    tui_append_position(&settings, scrollable->window->bounding_box.x, scrollable->window->bounding_box.y);
+    string_builder_append_string(&settings, string_from_cstring((char *)ASCII_CURSOR_SAVE_POSITION_DEC));
+    data_vector_push_and_write_optionally(&data_vector, settings.data, settings.count);
 
     for(size_t index = scrollable->offset; index < index_max; index++) {
         const String string = atlas_get_string_at_index(scrollable->atlas, index);
-
-        assert(general_array_size(write_vector) >= 4);
-        assert(fill_length >= 1);
         const size_t length_max = general_min(scrollable->window->bounding_box.width, scrollable->atlas->indecies.data[index].length);
         const size_t fill_width = scrollable->window->bounding_box.width - length_max;
-        size_t write_count = 0;
 
         if (index == scrollable->selection) {
-            write_vector[write_count].iov_base = (void*)selection_prefix;
-            write_vector[write_count].iov_len = selection_prefix_length;
-            write_count++;
-            write_vector[write_count].iov_base = (void*)string.cstring;
-            write_vector[write_count].iov_len = length_max;
-            write_count++;
-            write_vector[write_count].iov_base = (void*)selection_postifx;
-            write_vector[write_count].iov_len = selection_postfix_length;
-            write_count++;
+            data_vector_push_and_write_optionally(&data_vector, (void*)selection_prefix, selection_prefix_length);
+            data_vector_push_and_write_optionally(&data_vector, (void*)string.cstring, length_max);
+            data_vector_push_and_write_optionally(&data_vector, (void*)selection_postifx, selection_postfix_length);
         } else {
-            write_vector[write_count].iov_base = (void*)string.cstring;
-            write_vector[write_count].iov_len = length_max;
-            write_count++;
+            data_vector_push_and_write_optionally(&data_vector, (void*)string.cstring, length_max);
         }
 
-        __tui_element_scrollable_comulative_write(write_vector, general_array_size(write_vector) - 1, &write_count, fill, fill_length, fill_width);
-
-        assert(write_count < general_array_size(write_vector));
-        write_vector[write_count].iov_base = (void*)postfix;
-        write_vector[write_count].iov_len = postfix_length;
-        write_count++;
-        writev(STDOUT_FILENO, write_vector, write_count);
+        tui_fill_push_and_write_optionally(&data_vector, fill, fill_length, fill_width);
+        data_vector_push_and_write_optionally(&data_vector, (void*)postfix, postfix_length);
     }
 
     for (size_t index = index_max; index < scrollable->index_max_previous; index++) {
-        assert(general_array_size(write_vector) >= 1);
-        assert(fill_length >= 1);
         const size_t fill_width = scrollable->window->bounding_box.width;
-        size_t write_count = 0;
 
-        __tui_element_scrollable_comulative_write(write_vector, general_array_size(write_vector) - 1, &write_count, fill, fill_length, fill_width);
-
-        assert(write_count < general_array_size(write_vector));
-        write_vector[write_count].iov_base = (void*)postfix;
-        write_vector[write_count].iov_len = postfix_length;
-        write_count++;
-        writev(STDOUT_FILENO, write_vector, write_count);
+        tui_fill_push_and_write_optionally(&data_vector, fill, fill_length, fill_width);
+        data_vector_push_and_write_optionally(&data_vector, (void*)postfix, postfix_length);
     }
+
+    data_vector_write(&data_vector);
 
     //scrollable->offset_previous = scrollable->offset;
     //scrollable->selection_previous = scrollable->selection;
     scrollable->index_max_previous = index_max;
     //todo
+
+    string_builder_free(&settings);
 }
 
 typedef struct Tui_Element_Text {
     Tui_Window* window;
-
     size_t string_length_previous;
 } Tui_Element_Text;
 
@@ -740,21 +758,20 @@ static void tui_element_text_draw(Tui_Element_Text *text, String string) {
     const size_t string_length = general_min(text->window->bounding_box.width, string.length);
     const size_t fill_width = text->window->bounding_box.width - string_length;
 
-    struct iovec write_vector[20];
-    size_t write_count = 0;
+    String_Builder settings = {0};
+    Data_Vector data_vector = {0};
 
-    printf(ASCII_CURSOR_MOVE_TO_POSITION, text->window->bounding_box.y, text->window->bounding_box.x);
+    tui_append_position(&settings, text->window->bounding_box.x, text->window->bounding_box.y);
+    data_vector_push_and_write_optionally(&data_vector, settings.data, settings.count);
 
-    write_vector[write_count].iov_base = (void*)string.cstring;
-    write_vector[write_count].iov_len = string_length;
-    write_count++;
-
-    // todo: rename function
-    __tui_element_scrollable_comulative_write(write_vector, general_array_size(write_vector) - 1, &write_count, fill, fill_length, fill_width);
-    writev(STDOUT_FILENO, write_vector, write_count);
+    data_vector_push_and_write_optionally(&data_vector, string.cstring, string_length);
+    tui_fill_push_and_write_optionally(&data_vector, fill, fill_length, fill_width);
+    data_vector_write(&data_vector);
 
     // todo: update only as much as required
     text->string_length_previous = string.length;
+
+    string_builder_free(&settings);
 }
 
 #endif
