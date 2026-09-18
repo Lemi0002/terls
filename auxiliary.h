@@ -779,7 +779,7 @@ typedef struct Tui_Element_Line {
 } Tui_Element_Line;
 
 static void tui_element_line_vertical_draw(Tui_Element_Line* line, uint8_t character) {
-    const char postfix[] = ASCII_ESCAPE"[1B" ASCII_ESCAPE"[1D";
+    const char postfix[] = ASCII_CURSOR_RESTORE_POSITION_DEC ASCII_ESCAPE"[1B" ASCII_CURSOR_SAVE_POSITION_DEC;
     const size_t postfix_length = general_array_size(postfix) - 1;
 
     String_Builder settings = {0};
@@ -790,6 +790,7 @@ static void tui_element_line_vertical_draw(Tui_Element_Line* line, uint8_t chara
     }
 
     tui_append_position(&settings, line->window->bounding_box.x, line->window->bounding_box.y);
+    string_builder_append_string(&settings, string_from_cstring((char *)ASCII_CURSOR_SAVE_POSITION_DEC));
     data_vector_push_and_write_optionally(&data_vector, settings.data, settings.count);
 
     for(uint32_t dy = 0; dy < line->window->bounding_box.height; dy++) {
