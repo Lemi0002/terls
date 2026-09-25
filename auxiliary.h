@@ -15,6 +15,14 @@
 #define general_max(a, b) ((a) > (b) ? (a) : (b))
 #define general_absolute(a) ((a) < 0 ? -(a) : (a))
 #define general_sign(a) ((a) < 0 ? -1 : 1)
+#define general_compare(a, b) ((a) < (b) ? -1 : ((a) > (b) ? 1 : 0))
+
+#define general_swap_values(a, b) \
+    do { \
+        typeof((a)) tempo = (a); \
+        (a) = (b); \
+        (b) = tempo; \
+    } while(0)
 
 static uint8_t general_integer_width(size_t value) {
     uint8_t width = 0;
@@ -211,6 +219,57 @@ static void atlas_string_builder_end(Atlas* atlas) {
     const size_t length = atlas->string_builder.count - atlas->string_builder_tempo.count;
     dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder_tempo.count, .length = length}));
     string_builder_append_character(&atlas->string_builder, 0);
+}
+
+#define bubblesort_lambda(map, count, lambda) \
+    do { \
+        for(size_t i = 0; i < (count); i++) { \
+            for(size_t j = i + 1; j < (count); j++) { \
+                int result = (lambda); \
+                if (result > 0) { \
+                    general_swap_values((map)[i], (map)[j]); \
+                } \
+            } \
+        } \
+    } while(0)
+
+typedef struct Quicksort_Index {
+    ssize_t less;
+    ssize_t greater;
+} Quicksort_Index;
+
+typedef int (Quicksort_Callback)(size_t data_left, size_t data_right, void* context);
+
+static Quicksort_Index quicksort_sort_partition(size_t* data, ssize_t index_low, ssize_t index_high, Quicksort_Callback callback, void* context) {
+    size_t pivot = data[(index_low + index_high) >> 1];
+    ssize_t less = index_low;
+    ssize_t equal = index_low;
+    ssize_t greater = index_high;
+
+    while (equal <= greater) {
+        int result = callback(data[equal], pivot, context);
+        if (result < 0) {
+            general_swap_values(data[equal], data[less]);
+            less++;
+            equal++;
+        } else if (result > 0) {
+            general_swap_values(data[equal], data[greater]);
+            greater--;
+        } else {
+            equal++;
+        }
+    }
+
+    return (Quicksort_Index){.less=less, .greater=greater};
+}
+
+static void quicksort(size_t* data, ssize_t index_low, ssize_t index_high, Quicksort_Callback lambda, void* context) {
+    if (index_low < index_high) {
+        Quicksort_Index index = quicksort_sort_partition(data, index_low, index_high, lambda, context);
+
+        quicksort(data, index_low, index.less - 1, lambda, context);
+        quicksort(data, index.greater + 1, index_high, lambda, context);
+    }
 }
 
 #define ASCII_ESCAPE "\x1B"

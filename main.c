@@ -22,6 +22,47 @@
 
 #include "auxiliary.h"
 
+// typedef struct Quicksort_Index {
+//     ssize_t less;
+//     ssize_t greater;
+// } Quicksort_Index;
+//
+// typedef int (Quicksort_Callback)(size_t data_left, size_t data_right, void* context);
+//
+// Quicksort_Index quicksort_sort_partition(size_t* data, ssize_t index_low, ssize_t index_high, Quicksort_Callback callback, void* context) {
+//     size_t pivot = data[(index_low + index_high) >> 1];
+//     Atlas* strings = (Atlas*)context;
+//
+//     ssize_t less = index_low;
+//     ssize_t equal = index_low;
+//     ssize_t greater = index_high;
+//
+//     while (equal <= greater) {
+//         int result = callback(data[equal], pivot, context);
+//         if (result < 0) {
+//             general_swap_values(data[equal], data[less]);
+//             less++;
+//             equal++;
+//         } else if (result > 0) {
+//             general_swap_values(data[equal], data[greater]);
+//             greater--;
+//         } else {
+//             equal++;
+//         }
+//     }
+//
+//     return (Quicksort_Index){.less=less, .greater=greater};
+// }
+
+// void quicksort(size_t* data, ssize_t index_low, ssize_t index_high, Quicksort_Callback lambda, void* context) {
+//     if (index_low < index_high) {
+//         Quicksort_Index index = quicksort_sort_partition(data, index_low, index_high, lambda, context);
+//
+//         quicksort(data, index_low, index.less - 1, lambda, context);
+//         quicksort(data, index.greater + 1, index_high, lambda, context);
+//     }
+// }
+
 typedef enum Error {
     error_none = 0,
     error_realpath,
@@ -155,102 +196,68 @@ typedef enum Sort {
     SORT_NAME
 } Sort;
 
-#define bubble_sort_lambda(map, count, lambda) \
-    do { \
-        for(size_t i = 0; i < (count); i++) { \
-            for(size_t j = i + 1; j < (count); j++) { \
-                int result = (lambda); \
-                if (result > 0) { \
-                    size_t tempo = (map)[i]; \
-                    (map)[i] = (map)[j]; \
-                    (map)[j] = tempo; \
-                } \
-            } \
-        } \
-    } while(0)
+int record_callback_sort_inode(size_t data_left, size_t data_right, void* context) {
+    Entries* entries = (Entries*)context;
+    return general_compare(entries->data[data_left].inode, entries->data[data_right].inode);
+}
+
+int record_callback_sort_type(size_t data_left, size_t data_right, void* context) {
+    Entries* entries = (Entries*)context;
+    return general_compare(entry_convert_type_to_character(&entries->data[data_left]), entry_convert_type_to_character(&entries->data[data_right]));
+}
+
+int record_callback_sort_permissions(size_t data_left, size_t data_right, void* context) {
+    Entries* entries = (Entries*)context;
+    return general_compare((entries->data[data_left].mode & MODE_PERMISSIONS_MASK), (entries->data[data_right].mode & MODE_PERMISSIONS_MASK));
+}
+
+int record_callback_sort_link_count(size_t data_left, size_t data_right, void* context) {
+    Entries* entries = (Entries*)context;
+    return general_compare(entries->data[data_left].link_count, entries->data[data_right].link_count);
+}
+
+int record_callback_sort_uid(size_t data_left, size_t data_right, void* context) {
+    Entries* entries = (Entries*)context;
+    return general_compare(entries->data[data_left].uid, entries->data[data_right].uid);
+}
+
+int record_callback_sort_gid(size_t data_left, size_t data_right, void* context) {
+    Entries* entries = (Entries*)context;
+    return general_compare(entries->data[data_left].gid, entries->data[data_right].gid);
+}
+
+int record_callback_sort_size(size_t data_left, size_t data_right, void* context) {
+    Entries* entries = (Entries*)context;
+    return general_compare(entries->data[data_left].size, entries->data[data_right].size);
+}
+
+int record_callback_sort_time_modified(size_t data_left, size_t data_right, void* context) {
+    Entries* entries = (Entries*)context;
+    return general_compare(entries->data[data_left].time_modified, entries->data[data_right].time_modified);
+}
+
+int record_callback_sort_name(size_t data_left, size_t data_right, void* context) {
+    Atlas* names = (Atlas*)context;
+    return strcmp(atlas_get_cstring_at_index(names, data_left), atlas_get_cstring_at_index(names, data_right));
+}
 
 void record_create_sorted_map(Record *record, Sort sort) {
     dynamic_array_reset(&record->map);
-    for(size_t i = 0; i < record->names.indecies.count; i++) {
+    for(size_t i = 0; i < record->entries.count; i++) {
         dynamic_array_append(&record->map, i);
     }
 
     switch(sort) {
-        case SORT_NONE:
-            break;
-
-        case SORT_INODE:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                record->entries.data[record->map.data[i]].inode > record->entries.data[record->map.data[j]].inode ? 1 : 0
-            );
-            break;
-
-        case SORT_TYPE:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                entry_convert_type_to_character(&record->entries.data[record->map.data[i]]) > entry_convert_type_to_character(&record->entries.data[record->map.data[j]]) ? 1 : 0
-            );
-            break;
-
-        case SORT_PERMISSIONS:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                (record->entries.data[record->map.data[i]].mode & MODE_PERMISSIONS_MASK) > (record->entries.data[record->map.data[j]].mode & MODE_PERMISSIONS_MASK) ? 1 : 0
-            );
-            break;
-
-        case SORT_LINK_COUNT:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                record->entries.data[record->map.data[i]].link_count > record->entries.data[record->map.data[j]].link_count ? 1 : 0
-            );
-            break;
-
-        case SORT_UID:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                record->entries.data[record->map.data[i]].uid > record->entries.data[record->map.data[j]].uid ? 1 : 0
-            );
-            break;
-
-        case SORT_GID:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                record->entries.data[record->map.data[i]].gid > record->entries.data[record->map.data[j]].gid ? 1 : 0
-            );
-            break;
-
-        case SORT_SIZE:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                record->entries.data[record->map.data[i]].size > record->entries.data[record->map.data[j]].size ? 1 : 0
-            );
-            break;
-
-        case SORT_TIME_MODIFIED:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                record->entries.data[record->map.data[i]].time_modified > record->entries.data[record->map.data[j]].time_modified ? 1 : 0
-            );
-            break;
-
-        case SORT_NAME:
-            bubble_sort_lambda(
-                record->map.data,
-                record->entries.count,
-                strcmp(atlas_get_cstring_at_index(&record->names, record->map.data[i]), atlas_get_cstring_at_index(&record->names, record->map.data[j]))
-            );
-            break;
-
+        case SORT_NONE: break;
+        case SORT_INODE: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_inode, &record->entries); break;
+        case SORT_TYPE: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_type, &record->entries); break;
+        case SORT_PERMISSIONS: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_permissions, &record->entries); break;
+        case SORT_LINK_COUNT: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_link_count, &record->entries); break;
+        case SORT_UID: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_uid, &record->entries); break;
+        case SORT_GID: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_gid, &record->entries); break;
+        case SORT_SIZE: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_size, &record->entries); break;
+        case SORT_TIME_MODIFIED: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_time_modified, &record->entries); break;
+        case SORT_NAME: quicksort(record->map.data, 0, record->entries.count - 1, record_callback_sort_name, &record->names); break;
         default: break;
     }
 }
@@ -576,6 +583,7 @@ int main(int argc, char** argv) {
     };
     Tui_Window* windows_scratchpad[general_array_size(windows)];
 
+    // todo: add format to elements
     Tui_Element_Text text_path = {0};
     text_path.window = &windows[1];
 
