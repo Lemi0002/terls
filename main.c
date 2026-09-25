@@ -343,7 +343,6 @@ Error record_read_directory(Record *record, String directory) {
 }
 
 void record_convert_to_atlas(Record *record, Atlas* atlas) {
-    uint8_t index_width = general_integer_width(record->entries.count);
     uint8_t inode_width;
     uint8_t link_count_width;
     uint8_t size_width;

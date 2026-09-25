@@ -549,6 +549,8 @@ static Tui_Layout tui_axis_primary(Tui_Layout layout) {
             return TUI_LAYOUT_VERTICAL;
         case TUI_LAYOUT_HORIZONTAL:
             return TUI_LAYOUT_HORIZONTAL;
+        default:
+            return TUI_LAYOUT_HORIZONTAL;
     }
 }
 
@@ -558,6 +560,8 @@ static Tui_Layout tui_axis_secondary(Tui_Layout layout) {
             return TUI_LAYOUT_HORIZONTAL;
         case TUI_LAYOUT_HORIZONTAL:
             return TUI_LAYOUT_VERTICAL;
+        default:
+            return TUI_LAYOUT_HORIZONTAL;
     }
 }
 
@@ -573,7 +577,6 @@ static size_t tui_apply_child_window_length(Tui_Window* window, Tui_Layout layou
 static Tui_Error tui_check(Tui_Window* windows, Tui_Window** scratchpad, size_t count) {
     size_t root_index = 0;
     bool root_found = false;
-    size_t fill_count = 0;
 
     for(size_t i = 0; i < count; i++) {
         switch(windows[i].kind) {
@@ -664,7 +667,7 @@ static void tui_update(Tui_Window* windows, Tui_Window** scratchpad, size_t coun
                 assert(length <= parent_length);
                 if(child_window_fill != NULL) {
                     uint32_t const child_length = parent_length - length;
-                    tui_apply_child_window_length(child_window_fill, axis_primary, length, parent_length, parent_length - length);
+                    tui_apply_child_window_length(child_window_fill, axis_primary, length, parent_length, child_length);
                 }
 
                 uint32_t position = tui_bounding_box_position(&windows[i].bounding_box, axis_primary);
