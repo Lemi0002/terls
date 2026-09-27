@@ -163,14 +163,14 @@ static void string_builder_free(String_Builder* string_builder) {
     free(string_builder->data);
 }
 
-typedef struct Index {
+typedef struct Atlas_Index {
     size_t head;
     size_t length;
-} Index;
+} Atlas_Index;
 
 typedef struct Atlas {
-    struct Indecies {
-        Index* data;
+    struct Atlas_Indecies {
+        Atlas_Index* data;
         size_t size;
         size_t count;
     } indecies;
@@ -180,7 +180,7 @@ typedef struct Atlas {
 
 static void atlas_append_string(Atlas* atlas, String string) {
     const size_t length = string.length;
-    dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder.count, .length = length}));
+    dynamic_array_append(&atlas->indecies, ((Atlas_Index){.head = atlas->string_builder.count, .length = length}));
     string_builder_append_string(&atlas->string_builder, (String){.cstring = string.cstring, .length = length});
     string_builder_append_character(&atlas->string_builder, 0);
 }
@@ -217,7 +217,7 @@ static String_Builder* atlas_string_builder_begin(Atlas* atlas) {
 
 static void atlas_string_builder_end(Atlas* atlas) {
     const size_t length = atlas->string_builder.count - atlas->string_builder_tempo.count;
-    dynamic_array_append(&atlas->indecies, ((Index){.head = atlas->string_builder_tempo.count, .length = length}));
+    dynamic_array_append(&atlas->indecies, ((Atlas_Index){.head = atlas->string_builder_tempo.count, .length = length}));
     string_builder_append_character(&atlas->string_builder, 0);
 }
 
