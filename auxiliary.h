@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/uio.h>
+#include <linux/limits.h>
 
 #define general_array_size(array) (sizeof((array)) / sizeof((array)[0]))
 #define general_min(a, b) ((a) > (b) ? (b) : (a))
@@ -81,6 +82,9 @@ static size_t string_builder_append_string(String_Builder* string_builder, Strin
 static size_t string_builder_append_cstring(String_Builder* string_builder, char* cstring);
 static size_t string_builder_append_integer(String_Builder* string_builder, size_t data, const uint8_t width, const char fill_character);
 static void string_builder_free(String_Builder* string_builder);
+static bool path_normalize_from_string(String_Builder* path, String string);
+static void path_traverse_down(String_Builder* path, String directory);
+static bool path_traverse_up(String_Builder* path);
 
 static size_t buffer_insert_character(char* const buffer, const size_t buffer_length, const size_t offset, const char character) {
     assert(buffer_length > offset);
@@ -161,6 +165,66 @@ static size_t string_builder_append_integer(String_Builder* string_builder, size
 
 static void string_builder_free(String_Builder* string_builder) {
     free(string_builder->data);
+}
+
+static bool path_normalize_from_string(String_Builder* path, String string) {
+    bool error = false;
+    string_builder_reserve(path, PATH_MAX);
+
+    if (realpath(string.cstring, path->data) == NULL) {
+        error = true;
+    } else {
+        path->count = strlen(path->data) + 1;
+    }
+
+    return error;
+}
+
+static void path_traverse_down(String_Builder* path, String directory) {
+    static const char delimiter = '/';
+    assert(path->count > sizeof(delimiter));
+    assert(path->data[0] == delimiter);
+    assert(path->data[path->count - 1] == 0);
+
+    if (path->data[path->count - 2] != delimiter) {
+        path->data[path->count - 1] = delimiter;
+    } else {
+        path->count--;
+    }
+
+    string_builder_append_string(path, directory);
+    string_builder_append_character(path, 0);
+}
+
+static bool path_traverse_up(String_Builder* path) {
+    static const char delimiter = '/';
+    assert(path->count > sizeof(delimiter));
+    assert(path->data[0] == delimiter);
+    assert(path->data[path->count - 1] == 0);
+
+    if((path->data[0] == delimiter) && (path->data[1] == 0)) {
+        return true;
+    }
+
+    assert(path->count > sizeof(delimiter) + 1);
+    assert(path->data[path->count - 2] != delimiter);
+
+    ssize_t index;
+    for(index = path->count - 2; index >= 0; --index) {
+        if(path->data[index] == delimiter) {
+            break;
+        }
+    }
+
+    if (index == 0) {
+        path->data[index + 1] = 0;
+        path->count = index + 2;
+    } else {
+        path->data[index] = 0;
+        path->count = index + 1;
+    }
+
+    return false;
 }
 
 typedef struct Atlas_Index {
