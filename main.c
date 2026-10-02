@@ -12,6 +12,7 @@
 #include <termios.h>
 #include <signal.h>
 #include <limits.h>
+#include <poll.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -32,9 +33,11 @@ typedef enum Error {
     error_setvbuf,
     error_tcgetattr,
     error_tcsetattr,
+    error_poll,
     error_read,
     error_tui_check,
     error_tui_update,
+    error_monitor_input,
 } Error;
 
 typedef struct Entry {
@@ -463,6 +466,46 @@ Error app_path_down(String_Builder *path, Record *record, Tui_Element_Scrollable
     return error_none;
 }
 
+typedef enum Monitor_Input {
+    monitor_input_skip,
+    monitor_input_process,
+    monitor_input_error,
+} Monitor_Input;
+
+Monitor_Input app_monitor_input(uint8_t* input) {
+    const struct pollfd poll_vector[] = {
+        (struct pollfd){.fd = STDIN_FILENO, .events = POLLIN | POLLRDNORM | POLLRDBAND | POLLPRI}
+    };
+
+    int value = poll((struct pollfd*)poll_vector, general_array_size(poll_vector), -1);
+    if(value < 0) {
+        switch (errno) {
+            case EINTR:
+                return monitor_input_skip;
+            default:
+                return monitor_input_error;
+        }
+    } else if(value > 0) {
+        switch (value) {
+            case POLLERR:
+            case POLLHUP:
+            case POLLNVAL:
+                return monitor_input_error;
+            default:
+                break;
+        }
+
+        ssize_t count = read(STDIN_FILENO, input, 1);
+        if(count < 0) {
+            return monitor_input_error;
+        } else if(count > 0) {
+            return monitor_input_process;
+        }
+    }
+
+    return monitor_input_skip;
+}
+
 int main(int argc, char** argv) {
     String_Builder path = {0};
 
@@ -534,7 +577,7 @@ int main(int argc, char** argv) {
         return error_tui_check;
     }
 
-    char input = 0;
+    uint8_t input = 0;
     do {
         if (terminal_size_updated) {
             terminal_size_updated = 0;
@@ -556,69 +599,69 @@ int main(int argc, char** argv) {
             tui_element_line_vertical_draw(&line, '#');
         }
 
-        ssize_t count = read(STDIN_FILENO, &input, 1);
-        if(count < 0) {
-            return error_read;
-        } else if(count > 0) {
-            switch(input) {
-                case 'q': break;
-                case 'j':
-                    tui_element_scrollable_update(&scrollable_primary_line_number, 1, true, true);
-                    tui_element_scrollable_update(&scrollable_primary, 1, true, true);
-                    app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
-                    tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
-
-                    tui_element_scrollable_draw(&scrollable_primary_line_number);
-                    tui_element_scrollable_draw(&scrollable_primary);
-                    tui_element_scrollable_draw(&scrollable_secondary);
-                    break;
-
-                case 'k':
-                    tui_element_scrollable_update(&scrollable_primary_line_number, 1, false, true);
-                    tui_element_scrollable_update(&scrollable_primary, 1, false, true);
-                    app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
-                    tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
-
-                    tui_element_scrollable_draw(&scrollable_primary_line_number);
-                    tui_element_scrollable_draw(&scrollable_primary);
-                    tui_element_scrollable_draw(&scrollable_secondary);
-                    break;
-
-                case 'h':
-                    app_path_up(&path);
-                    app_update_primary(&primary_record, &primary_atlas, &path);
-                    app_update_primary_line_number(&primary_record, &primary_line_number);
-                    tui_element_scrollable_update(&scrollable_primary_line_number, 0, true, true);
-                    tui_element_scrollable_update(&scrollable_primary, 0, true, true);
-                    app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
-                    tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
-
-                    tui_element_scrollable_draw(&scrollable_primary_line_number);
-                    tui_element_scrollable_draw(&scrollable_primary);
-                    tui_element_scrollable_draw(&scrollable_secondary);
-                    tui_element_text_draw(&text_path, string_from_cstring(path.data));
-                    break;
-
-                case 'l':
-                    app_path_down(&path, &primary_record, &scrollable_primary);
-                    app_update_primary(&primary_record, &primary_atlas, &path);
-                    app_update_primary_line_number(&primary_record, &primary_line_number);
-                    tui_element_scrollable_update(&scrollable_primary_line_number, 0, true, true);
-                    tui_element_scrollable_update(&scrollable_primary, 0, true, true);
-                    app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
-                    tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
-
-                    tui_element_scrollable_draw(&scrollable_primary_line_number);
-                    tui_element_scrollable_draw(&scrollable_primary);
-                    tui_element_scrollable_draw(&scrollable_secondary);
-                    tui_element_text_draw(&text_path, string_from_cstring(path.data));
-                    break;
-
-                default: break;
-            }
+        Monitor_Input monitor_input = app_monitor_input(&input);
+        switch (monitor_input) {
+            case monitor_input_skip: continue;
+            case monitor_input_process: break;
+            case monitor_input_error: return error_monitor_input;
         }
 
-        usleep(5000);
+        switch(input) {
+            case 'q': break;
+            case 'j':
+                tui_element_scrollable_update(&scrollable_primary_line_number, 1, true, true);
+                tui_element_scrollable_update(&scrollable_primary, 1, true, true);
+                app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
+                tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
+
+                tui_element_scrollable_draw(&scrollable_primary_line_number);
+                tui_element_scrollable_draw(&scrollable_primary);
+                tui_element_scrollable_draw(&scrollable_secondary);
+                break;
+
+            case 'k':
+                tui_element_scrollable_update(&scrollable_primary_line_number, 1, false, true);
+                tui_element_scrollable_update(&scrollable_primary, 1, false, true);
+                app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
+                tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
+
+                tui_element_scrollable_draw(&scrollable_primary_line_number);
+                tui_element_scrollable_draw(&scrollable_primary);
+                tui_element_scrollable_draw(&scrollable_secondary);
+                break;
+
+            case 'h':
+                app_path_up(&path);
+                app_update_primary(&primary_record, &primary_atlas, &path);
+                app_update_primary_line_number(&primary_record, &primary_line_number);
+                tui_element_scrollable_update(&scrollable_primary_line_number, 0, true, true);
+                tui_element_scrollable_update(&scrollable_primary, 0, true, true);
+                app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
+                tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
+
+                tui_element_scrollable_draw(&scrollable_primary_line_number);
+                tui_element_scrollable_draw(&scrollable_primary);
+                tui_element_scrollable_draw(&scrollable_secondary);
+                tui_element_text_draw(&text_path, string_from_cstring(path.data));
+                break;
+
+            case 'l':
+                app_path_down(&path, &primary_record, &scrollable_primary);
+                app_update_primary(&primary_record, &primary_atlas, &path);
+                app_update_primary_line_number(&primary_record, &primary_line_number);
+                tui_element_scrollable_update(&scrollable_primary_line_number, 0, true, true);
+                tui_element_scrollable_update(&scrollable_primary, 0, true, true);
+                app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
+                tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
+
+                tui_element_scrollable_draw(&scrollable_primary_line_number);
+                tui_element_scrollable_draw(&scrollable_primary);
+                tui_element_scrollable_draw(&scrollable_secondary);
+                tui_element_text_draw(&text_path, string_from_cstring(path.data));
+                break;
+
+            default: break;
+        }
     } while (input != 'q');
 
     error = terminal_restore_settings(&settings_saved);
