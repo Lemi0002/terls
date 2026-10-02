@@ -232,10 +232,16 @@ void record_create_sorted_map(Record *record, Sort sort) {
     } while(0)
 
 Error terminal_apply_settings(struct termios* settings_saved) {
-    printf(
+    const char data[] =
         ASCII_PRIVATE_ENABLE_ALTERNATIVE_BUFFER
         ASCII_CURSOR_MOVE_TO_HOME
-    );
+        ASCII_PRIVATE_CURSOR_INVISIBLE;
+    const size_t data_length =
+        ASCII_PRIVATE_ENABLE_ALTERNATIVE_BUFFER_LENGTH +
+        ASCII_CURSOR_MOVE_TO_HOME_LENGTH +
+        ASCII_PRIVATE_CURSOR_INVISIBLE_LENGTH;
+
+    write(STDOUT_FILENO, data, data_length);
 
     if(setvbuf(stdout, NULL, _IONBF, 0) != 0) {
         return error_setvbuf;
@@ -263,10 +269,16 @@ Error terminal_restore_settings(struct termios* settings_saved) {
         return error_tcsetattr;
     }
 
-    printf(
+    const char data[] =
         ASCII_PRIVATE_DISABLE_ALTERNATIVE_BUFFER
         ASCII_RESET
-    );
+        ASCII_PRIVATE_CURSOR_VISIBLE;
+    const size_t data_length =
+        ASCII_PRIVATE_DISABLE_ALTERNATIVE_BUFFER_LENGTH +
+        ASCII_RESET_LENGTH +
+        ASCII_PRIVATE_CURSOR_VISIBLE_LENGTH;
+
+    write(STDOUT_FILENO, data, data_length);
 
     return error_none;
 }
