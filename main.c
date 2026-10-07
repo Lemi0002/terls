@@ -12,8 +12,8 @@
 #include <termios.h>
 #include <signal.h>
 #include <limits.h>
-#include <poll.h>
 
+#include <sys/epoll.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -25,6 +25,8 @@
 typedef enum Error {
     error_none = 0,
     error_path,
+    error_epoll,
+    error_epoll_ctl,
     error_opendir,
     error_malloc,
     error_readdir,
@@ -466,33 +468,46 @@ Error app_path_down(String_Builder *path, Record *record, Tui_Element_Scrollable
     return error_none;
 }
 
+Error app_setup_input(int *input_fd) {
+    *input_fd = epoll_create1(0);
+    if (*input_fd == -1) {
+        return error_epoll;
+    }
+
+    struct epoll_event event;
+    event.events = EPOLLIN;
+    event.data.fd = STDIN_FILENO;
+    int error = epoll_ctl(*input_fd, EPOLL_CTL_ADD, STDIN_FILENO, &event);
+    if (error) {
+        return error_epoll_ctl;
+    }
+
+    return error_none;
+}
+
 typedef enum Monitor_Input {
     monitor_input_skip,
     monitor_input_process,
     monitor_input_error,
 } Monitor_Input;
 
-Monitor_Input app_monitor_input(uint8_t* input) {
-    const struct pollfd poll_vector[] = {
-        (struct pollfd){.fd = STDIN_FILENO, .events = POLLIN | POLLRDNORM | POLLRDBAND | POLLPRI}
-    };
-
-    int value = poll((struct pollfd*)poll_vector, general_array_size(poll_vector), -1);
-    if(value < 0) {
+Monitor_Input app_monitor_input(int input_fd, uint8_t* input) {
+    struct epoll_event event;
+    int event_count = epoll_wait(input_fd, &event, 1, -1);
+    if(event_count < 0) {
         switch (errno) {
             case EINTR:
                 return monitor_input_skip;
             default:
                 return monitor_input_error;
         }
-    } else if(value > 0) {
-        switch (value) {
-            case POLLERR:
-            case POLLHUP:
-            case POLLNVAL:
-                return monitor_input_error;
-            default:
-                break;
+    } else if(event_count > 0) {
+        if (event.events & (EPOLLERR | EPOLLHUP | EPOLLPRI | EPOLLRDHUP)) {
+            return monitor_input_error;
+        }
+
+        if (!(event.events & EPOLLIN)) {
+            return monitor_input_skip;
         }
 
         ssize_t count = read(STDIN_FILENO, input, 1);
@@ -521,11 +536,17 @@ int main(int argc, char** argv) {
     }
 
     Error error;
+    int input_fd;
     Record primary_record = {0};
     Record secondary_record = {0};
     Atlas primary_line_number = {0};
     Atlas primary_atlas = {0};
     Atlas secondary_atlas = {0};
+
+    error = app_setup_input(&input_fd);
+    if (error != error_none) {
+        return error;
+    }
 
     struct termios settings_saved;
     error = terminal_apply_settings(&settings_saved);
@@ -599,7 +620,7 @@ int main(int argc, char** argv) {
             tui_element_line_vertical_draw(&line, '#');
         }
 
-        Monitor_Input monitor_input = app_monitor_input(&input);
+        Monitor_Input monitor_input = app_monitor_input(input_fd, &input);
         switch (monitor_input) {
             case monitor_input_skip: continue;
             case monitor_input_process: break;
