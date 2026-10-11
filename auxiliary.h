@@ -17,6 +17,7 @@
 #define general_absolute(a) ((a) < 0 ? -(a) : (a))
 #define general_sign(a) ((a) < 0 ? -1 : 1)
 #define general_compare(a, b) ((a) < (b) ? -1 : ((a) > (b) ? 1 : 0))
+#define general_number_of_arguments(type, ...) (sizeof((type[]){__VA_ARGS__})/sizeof(type))
 
 #define general_swap_values(a, b) \
     do { \
@@ -559,8 +560,6 @@ typedef enum Tui_Error {
     TUI_ERROR_MULTIPLE_FILL_SIZE_WINDOWS,
 } Tui_Error;
 
-#define tui_window_number_of_arguments(...)  (sizeof((Tui_Window[]){__VA_ARGS__})/sizeof(Tui_Window))
-
 #define tui_window_make_root(id_root, layout_root, ...) \
     (Tui_Window){ \
         .id = (id_root), \
@@ -569,7 +568,7 @@ typedef enum Tui_Error {
         .size = {0}, \
         .bounding_box = {0}, \
         .layout = (layout_root), \
-        .child_count = tui_window_number_of_arguments(__VA_ARGS__), \
+        .child_count = general_number_of_arguments(Tui_Window, __VA_ARGS__), \
     }, __VA_ARGS__
 
 #define tui_window_make_layout(id_parent, id_child, size_child, layout_child, ...) \
@@ -580,7 +579,7 @@ typedef enum Tui_Error {
         .size = (size_child), \
         .bounding_box = {0}, \
         .layout = (layout_child), \
-        .child_count = tui_window_number_of_arguments(__VA_ARGS__), \
+        .child_count = general_number_of_arguments(Tui_Window, __VA_ARGS__), \
     }, __VA_ARGS__
 
 #define tui_window_make_leaf(id_parent, id_child, size_child) \
@@ -926,6 +925,121 @@ static void tui_element_line_vertical_draw(Tui_Element_Line* line, uint8_t chara
 
     data_vector_write(&data_vector);
     string_builder_free(&settings);
+}
+
+typedef enum Vim_Motion_Kind {
+    VIM_MOTION_KIND_BRANCH,
+    VIM_MOTION_KIND_LEAF,
+} Vim_Motion_Kind;
+
+typedef enum Vim_State {
+    vim_state_first = 0,
+    vim_state_count_or_motion,
+    vim_state_motion,
+    vim_state_done,
+} Vim_State;
+
+typedef struct Vim_Motion {
+    uint32_t id;
+    Vim_Motion_Kind kind;
+    uint8_t key;
+    const struct Vim_Motion* motions;
+    size_t motions_count;
+} Vim_Motion;
+
+typedef struct Vim_Action {
+    uint32_t count;
+    uint32_t id;
+} Vim_Action;
+
+typedef struct Vim {
+    Vim_State state;
+    Vim_Action action;
+    const Vim_Motion* motions;
+    size_t motions_count;
+    const Vim_Motion* motions_active;
+    size_t motions_count_active;
+} Vim;
+
+#define vim_motion_make_branch(key_this, motions_children) \
+    (Vim_Motion){ \
+        .id = 0, \
+        .kind = VIM_MOTION_KIND_BRANCH, \
+        .key = (key_this), \
+        .motions = (motions_children), \
+        .motions_count = general_array_size((motions_children)), \
+    }
+
+#define vim_motion_make_leaf(key_this, id_this) \
+    (Vim_Motion){ \
+        .id = (id_this), \
+        .kind = VIM_MOTION_KIND_LEAF, \
+        .key = (key_this), \
+        .motions = NULL, \
+        .motions_count = 0, \
+    }
+
+static void vim_reset(Vim* vim) {
+    vim->state = vim_state_first;
+    vim->action.count = 0;
+    vim->action.id = 0;
+    vim->motions_active = vim->motions;
+    vim->motions_count_active = vim->motions_count;
+}
+
+typedef enum Vim_Advance {
+    vim_advance_skip,
+    vim_advance_done,
+} Vim_Advance;
+
+static Vim_Advance vim_advance(Vim *vim, uint8_t key) {
+    if(vim->state == vim_state_done) {
+        vim_reset(vim);
+    }
+
+    uint8_t digit_min;
+    if(vim->state == vim_state_first) {
+        digit_min = '1';
+    } else {
+        digit_min = '0';
+    }
+
+    if(vim->state != vim_state_motion) {
+        if((key >= digit_min) && (key <= '9')) {
+            // todo: overflow
+            vim->state = vim_state_count_or_motion;
+            vim->action.count *= 10;
+            vim->action.count += (key - '0');
+            vim->action.id = 0;
+            return vim_advance_skip;
+        }
+    }
+
+    for(size_t i = 0; i < vim->motions_count_active; i++) {
+        if(vim->motions_active[i].key != key) {
+            continue;
+        }
+
+        switch(vim->motions_active[i].kind) {
+            case VIM_MOTION_KIND_BRANCH:
+                vim->state = vim_state_motion;
+                vim->motions_count_active = vim->motions_active[i].motions_count;
+                vim->motions_active = vim->motions_active[i].motions;
+                return vim_advance_skip;
+            case VIM_MOTION_KIND_LEAF:
+                vim->state = vim_state_done;
+                vim->action.id = vim->motions_active[i].id;
+
+                if(vim->action.count == 0) {
+                    vim->action.count = 1;
+                }
+
+                return vim_advance_done;
+        }
+    }
+
+    vim_reset(vim);
+    return vim_advance_skip;
 }
 
 #endif

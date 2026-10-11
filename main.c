@@ -598,7 +598,36 @@ int main(int argc, char** argv) {
         return error_tui_check;
     }
 
+    enum Vim_Id {
+        vim_id_quit,
+        vim_id_left,
+        vim_id_right,
+        vim_id_up,
+        vim_id_down,
+        vim_id_top,
+        vim_id_bottom,
+    };
+
+    const Vim_Motion motions_branch_g[] = {
+        vim_motion_make_leaf('g', vim_id_top),
+    };
+
+    const Vim_Motion motions[] = {
+        vim_motion_make_leaf('q', vim_id_quit),
+        vim_motion_make_leaf('h', vim_id_left),
+        vim_motion_make_leaf('j', vim_id_down),
+        vim_motion_make_leaf('k', vim_id_up),
+        vim_motion_make_leaf('l', vim_id_right),
+        vim_motion_make_branch('g', motions_branch_g),
+        vim_motion_make_leaf('G', vim_id_bottom),
+    };
+
     uint8_t input = 0;
+    Vim vim = {0};
+    vim.motions = motions;
+    vim.motions_count = general_array_size(motions);
+    vim_reset(&vim);
+
     do {
         if (terminal_size_updated) {
             terminal_size_updated = 0;
@@ -620,18 +649,22 @@ int main(int argc, char** argv) {
             tui_element_line_vertical_draw(&line, '#');
         }
 
-        Monitor_Input monitor_input = app_monitor_input(input_fd, &input);
-        switch (monitor_input) {
+        switch(app_monitor_input(input_fd, &input)) {
             case monitor_input_skip: continue;
             case monitor_input_process: break;
             case monitor_input_error: return error_monitor_input;
         }
 
-        switch(input) {
-            case 'q': break;
-            case 'j':
-                tui_element_scrollable_update(&scrollable_primary_line_number, 1, true, true);
-                tui_element_scrollable_update(&scrollable_primary, 1, true, true);
+        switch(vim_advance(&vim, input)) {
+            case vim_advance_skip: continue;
+            case vim_advance_done: break;
+        }
+
+        switch(vim.action.id) {
+            case vim_id_quit: break;
+            case vim_id_down:
+                tui_element_scrollable_update(&scrollable_primary_line_number, vim.action.count, true, true);
+                tui_element_scrollable_update(&scrollable_primary, vim.action.count, true, true);
                 app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
                 tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
 
@@ -640,9 +673,9 @@ int main(int argc, char** argv) {
                 tui_element_scrollable_draw(&scrollable_secondary);
                 break;
 
-            case 'k':
-                tui_element_scrollable_update(&scrollable_primary_line_number, 1, false, true);
-                tui_element_scrollable_update(&scrollable_primary, 1, false, true);
+            case vim_id_up:
+                tui_element_scrollable_update(&scrollable_primary_line_number, vim.action.count, false, true);
+                tui_element_scrollable_update(&scrollable_primary, vim.action.count, false, true);
                 app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
                 tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
 
@@ -651,7 +684,29 @@ int main(int argc, char** argv) {
                 tui_element_scrollable_draw(&scrollable_secondary);
                 break;
 
-            case 'h':
+            case vim_id_top:
+                tui_element_scrollable_update(&scrollable_primary_line_number, vim.action.count - 1, true, false);
+                tui_element_scrollable_update(&scrollable_primary, vim.action.count - 1, true, false);
+                app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
+                tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
+
+                tui_element_scrollable_draw(&scrollable_primary_line_number);
+                tui_element_scrollable_draw(&scrollable_primary);
+                tui_element_scrollable_draw(&scrollable_secondary);
+                break;
+
+            case vim_id_bottom:
+                tui_element_scrollable_update(&scrollable_primary_line_number, SIZE_MAX, true, false);
+                tui_element_scrollable_update(&scrollable_primary, SIZE_MAX, true, false);
+                app_update_secondary(&primary_record, &scrollable_primary, &secondary_record, &secondary_atlas, &path);
+                tui_element_scrollable_update(&scrollable_secondary, 0, true, true);
+
+                tui_element_scrollable_draw(&scrollable_primary_line_number);
+                tui_element_scrollable_draw(&scrollable_primary);
+                tui_element_scrollable_draw(&scrollable_secondary);
+                break;
+
+            case vim_id_left:
                 app_path_up(&path);
                 app_update_primary(&primary_record, &primary_atlas, &path);
                 app_update_primary_line_number(&primary_record, &primary_line_number);
@@ -666,7 +721,7 @@ int main(int argc, char** argv) {
                 tui_element_text_draw(&text_path, string_from_cstring(path.data));
                 break;
 
-            case 'l':
+            case vim_id_right:
                 app_path_down(&path, &primary_record, &scrollable_primary);
                 app_update_primary(&primary_record, &primary_atlas, &path);
                 app_update_primary_line_number(&primary_record, &primary_line_number);
